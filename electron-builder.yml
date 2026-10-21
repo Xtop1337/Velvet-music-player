@@ -1,0 +1,39 @@
+appId: app.velvet.player
+productName: Velvet
+directories:
+  buildResources: build
+files:
+  - '!**/.vscode/*'
+  - '!src/*'
+  - '!tests/*'
+  - '!electron.vite.config.*'
+  - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
+  - '!{README.md,.gitignore}'
+asarUnpack:
+  - node_modules/ffmpeg-static/**
+  - resources/**
+extraResources:
+  - from: resources
+    to: resources
+win:
+  target: nsis
+  icon: build/icon.png
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  artifactName: ${productName}-Setup-${version}.${ext}
+publish:
+  # Replace with your GitHub account and repository to enable auto-updates
+  provider: github
+  owner: Xtop1337
+  repo: velvet-player
+mac:
+  target:
+    - dmg
+    - zip
+  icon: build/icon.png
+  category: public.app-category.music
+linux:
+  target: AppImage
+  icon: build/icon.png
+  category: Audio

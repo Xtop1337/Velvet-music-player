@@ -1,0 +1,47 @@
+{
+  "name": "velvet-player",
+  "productName": "Velvet",
+  "version": "1.0.0",
+  "description": "Velvet — музыкальный плеер со slowed/nightcore пресетами, Discord-активностью и импортом из SoundCloud/Spotify",
+  "author": "Velvet",
+  "license": "MIT",
+  "main": "out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "preview": "electron-vite preview",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+    "test": "vitest run",
+    "dist": "electron-vite build && electron-builder",
+    "dist:win": "electron-vite build && electron-builder --win",
+    "dist:mac": "electron-vite build && electron-builder --mac",
+    "dist:linux": "electron-vite build && electron-builder --linux"
+  },
+  "dependencies": {
+    "@xhayper/discord-rpc": "^1.5.1",
+    "electron-updater": "^6.8.10",
+    "ffmpeg-static": "^5.3.0",
+    "music-metadata": "^11.10.0",
+    "node-taglib-sharp": "^6.0.3"
+  },
+  "devDependencies": {
+    "@fontsource-variable/inter": "^5.2.8",
+    "@fontsource-variable/manrope": "^5.2.8",
+    "@types/node": "^22.10.0",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "@vitejs/plugin-react": "^5.2.0",
+    "electron": "^42.11.11",
+    "electron-builder": "^26.0.12",
+    "electron-vite": "^4.0.1",
+    "i18next": "^25.10.10",
+    "lucide-react": "^0.577.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "react-i18next": "^16.6.6",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.7",
+    "vitest": "^3.2.7",
+    "zustand": "^5.0.8"
+  }
+}
