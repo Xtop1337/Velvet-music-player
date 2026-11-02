@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Track } from '@shared/types'
-import { countsAsPlay, summarize } from '../src/renderer/src/lib/stats'
+import { countsAsPlay, summarize } from '../src/lib/stats'
 
 const track = (id: string, artist: string, album: string): Track => ({
   id, path: `/${id}.mp3`, title: id.toUpperCase(), artist, album, duration: 200, source: 'local', addedAt: 0

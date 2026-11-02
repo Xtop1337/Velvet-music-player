@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Track } from '@shared/types'
-import { groupAlbums, groupArtists, sortTracks, splitArtists, tracksOfArtist } from '../src/renderer/src/lib/group'
+import { groupAlbums, groupArtists, sortTracks, splitArtists, tracksOfArtist } from '../src/lib/group'
 
 const t = (id: string, title: string, artist: string, album: string, extra: Partial<Track> = {}): Track => ({
   id, path: `/${id}`, title, artist, album, duration: 100, source: 'local', addedAt: 0, ...extra

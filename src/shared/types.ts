@@ -1,3 +1,5 @@
+import type { GlobalAction, HotkeyMap, LocalAction } from './hotkeys'
+
 export type TrackSource = 'local' | 'soundcloud' | 'spotify' | 'youtube'
 
 export interface Track {
@@ -73,12 +75,14 @@ export type VisualizerMode = 'bars' | 'wave' | 'circle' | 'particles'
 export type BackgroundMode = 'none' | 'image' | 'cover' | 'video'
 
 export type ThemeId = 'snow' | 'midnight' | 'aurora' | 'system'
-export type Language = 'ru' | 'en'
+export type Language = 'ru' | 'en' | 'uk' | 'de' | 'es' | 'fr'
+/** 'auto' follows the system language. */
+export type LanguageSetting = Language | 'auto'
 export type RepeatMode = 'off' | 'all' | 'one'
 export type ImportFormat = 'mp3' | 'm4a' | 'best'
 
 export interface Settings {
-  language: Language
+  language: LanguageSetting
   theme: ThemeId
   /** Empty string means "use the theme's own accent". */
   accent: string
@@ -103,6 +107,8 @@ export interface Settings {
     showSpeed: boolean
     showButtons: boolean
     lookupCovers: boolean
+    /** Remove the activity while paused instead of showing "Paused". */
+    hideWhenPaused: boolean
   }
   importer: {
     downloadDir: string
@@ -130,6 +136,10 @@ export interface Settings {
   customPresets: Preset[]
   updates: {
     auto: boolean
+  }
+  hotkeys: {
+    local: HotkeyMap<LocalAction>
+    global: HotkeyMap<GlobalAction>
   }
   desktop: {
     closeToTray: boolean
@@ -275,15 +285,22 @@ export type PlayerCommand =
 export interface AppPrefs {
   closeToTray: boolean
   globalShortcuts: boolean
+  globalHotkeys: HotkeyMap<GlobalAction>
   notifications: boolean
   miniOnTop: boolean
   language: Language
 }
 
 export interface UpdateStatus {
-  state: 'dev' | 'unconfigured' | 'idle' | 'checking' | 'downloading' | 'ready' | 'none' | 'error'
+  state: 'idle' | 'checking' | 'available' | 'none' | 'error'
+  /** newer version published on GitHub */
   version?: string
-  percent?: number
+  /** running version */
+  current?: string
+  /** release page on GitHub */
+  url?: string
+  /** release notes, shortened */
+  notes?: string
   error?: string
   checkedAt?: number
 }

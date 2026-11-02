@@ -11,7 +11,7 @@
     "resolveJsonModule": true,
     "noEmit": true,
     "baseUrl": ".",
-    "paths": { "@shared/*": ["src/shared/*"] }
+    "paths": { "@shared/*": ["src/shared/*"], "@renderer/*": ["src/*"] }
   },
-  "include": ["electron.vite.config.ts", "src/main/**/*", "src/preload/**/*", "src/shared/**/*", "tests/**/*"]
+  "include": ["vite.config.ts", "vitest.config.ts", "tests/**/*"]
 }

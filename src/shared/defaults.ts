@@ -1,3 +1,4 @@
+import { DEFAULT_GLOBAL_HOTKEYS, DEFAULT_LOCAL_HOTKEYS, mergeHotkeys } from './hotkeys'
 import type { Preset, Settings } from './types'
 
 export const RATE_MIN = 0.25
@@ -16,7 +17,7 @@ export const BUILTIN_PRESETS: Preset[] = [
 ]
 
 export const DEFAULT_SETTINGS: Settings = {
-  language: 'ru',
+  language: 'auto',
   theme: 'snow',
   accent: '',
   accentFromCover: false,
@@ -37,7 +38,8 @@ export const DEFAULT_SETTINGS: Settings = {
     clientId: '',
     showSpeed: true,
     showButtons: true,
-    lookupCovers: true
+    lookupCovers: true,
+    hideWhenPaused: false
   },
   importer: {
     downloadDir: '',
@@ -63,7 +65,8 @@ export const DEFAULT_SETTINGS: Settings = {
   customPresets: [],
   exporter: { format: 'mp3', dir: '', addToLibrary: true },
   desktop: { closeToTray: false, globalShortcuts: true, notifications: false, miniOnTop: true },
-  updates: { auto: true }
+  updates: { auto: true },
+  hotkeys: { local: DEFAULT_LOCAL_HOTKEYS, global: DEFAULT_GLOBAL_HOTKEYS }
 }
 
 /** Deep-merges stored settings over defaults so new fields get sane values. */
@@ -81,7 +84,11 @@ export function mergeSettings(stored: Partial<Settings> | null | undefined): Set
     customPresets: Array.isArray(s.customPresets) ? s.customPresets : [],
     exporter: { ...DEFAULT_SETTINGS.exporter, ...(s.exporter ?? {}) },
     desktop: { ...DEFAULT_SETTINGS.desktop, ...(s.desktop ?? {}) },
-    updates: { ...DEFAULT_SETTINGS.updates, ...(s.updates ?? {}) }
+    updates: { ...DEFAULT_SETTINGS.updates, ...(s.updates ?? {}) },
+    hotkeys: {
+      local: mergeHotkeys(s.hotkeys?.local, DEFAULT_LOCAL_HOTKEYS),
+      global: mergeHotkeys(s.hotkeys?.global, DEFAULT_GLOBAL_HOTKEYS)
+    }
   }
 }
 

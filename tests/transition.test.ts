@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { planTransition } from '../src/renderer/src/audio/transition'
+import { planTransition } from '../src/audio/transition'
 
 describe('planTransition', () => {
   it('does nothing when crossfade and gapless are off (the default)', () => {
@@ -16,5 +16,18 @@ describe('planTransition', () => {
   it('gapless starts the next track a few ms before the end', () => {
     expect(planTransition({ remaining: 0.5, length: 200, crossfade: 0, gapless: true }).action).toBe('preload')
     expect(planTransition({ remaining: 0.05, length: 200, crossfade: 0, gapless: true })).toEqual({ action: 'start', seconds: 0.03 })
+  })
+})
+
+import { secondsUntilNextStage } from '../src/audio/transition'
+
+describe('secondsUntilNextStage', () => {
+  it('sleeps until the preload window, then until the start', () => {
+    expect(secondsUntilNextStage({ remaining: 60, length: 200, crossfade: 6, gapless: false })).toBe(42)
+    expect(secondsUntilNextStage({ remaining: 10, length: 200, crossfade: 6, gapless: false })).toBe(4)
+    expect(secondsUntilNextStage({ remaining: 5, length: 200, crossfade: 0, gapless: true })).toBeCloseTo(4.94)
+  })
+  it('never wakes up when transitions are off', () => {
+    expect(secondsUntilNextStage({ remaining: 5, length: 200, crossfade: 0, gapless: false })).toBe(Infinity)
   })
 })

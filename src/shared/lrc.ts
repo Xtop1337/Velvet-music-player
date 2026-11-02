@@ -63,3 +63,31 @@ export function toLrc(lines: { timestamp?: number; text: string }[]): string {
     })
     .join('\n')
 }
+
+/**
+ * Gives unsynced lyrics approximate timestamps so they can scroll with the song:
+ * lines share the track (minus intro/outro) in proportion to their length.
+ */
+export function estimateTimes(lines: LyricLine[], duration: number): LyricLine[] {
+  const text = lines.filter((l) => l.text.trim())
+  if (!text.length || duration <= 0) return lines
+  const start = Math.min(12, duration * 0.07)
+  const end = duration * 0.95
+  const weight = (l: LyricLine): number => (l.text.trim() ? 6 + l.text.length : 4)
+  const total = lines.reduce((s, l) => s + weight(l), 0)
+  let t = start
+  return lines.map((l) => {
+    const line = { time: t, text: l.text }
+    t += ((end - start) * weight(l)) / total
+    return line
+  })
+}
+
+/** 0..1 progress through line `i` at `time` (for the karaoke fill). */
+export function lineProgress(lines: LyricLine[], i: number, time: number, duration: number): number {
+  const start = lines[i]?.time ?? 0
+  const next = lines[i + 1]?.time ?? Math.max(start + 4, duration)
+  // a line is "sung" over at most ~6 s, long gaps are instrumental breaks
+  const len = Math.max(0.5, Math.min(next - start, 6))
+  return Math.min(1, Math.max(0, (time - start) / len))
+}
