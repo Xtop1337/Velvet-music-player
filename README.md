@@ -1,3 +1,7 @@
+<p align="center">
+  🇷🇺 <b>Русский</b> &nbsp;|&nbsp; 🇬🇧 <a href="README.en.md">English</a>
+</p>
+
 # Velvet — музыкальный плеер
 
 Десктопный плеер на **Rust (Tauri 2) + React + TypeScript**: скорость до 3x, slowed / nightcore / reverb-пресеты,
