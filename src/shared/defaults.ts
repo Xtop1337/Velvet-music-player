@@ -39,6 +39,7 @@ export const DEFAULT_SETTINGS: Settings = {
     showSpeed: true,
     showButtons: true,
     lookupCovers: true,
+    uploadCovers: true,
     hideWhenPaused: false
   },
   importer: {
@@ -60,9 +61,11 @@ export const DEFAULT_SETTINGS: Settings = {
     shuffle: false,
     repeat: 'off',
     crossfade: 0,
-    gapless: false
+    gapless: false,
+    simpleAudio: false
   },
   customPresets: [],
+  analysis: { enabled: true, lookupOnline: true },
   exporter: { format: 'mp3', dir: '', addToLibrary: true },
   desktop: { closeToTray: false, globalShortcuts: true, notifications: false, miniOnTop: true },
   updates: { auto: true },
@@ -82,6 +85,7 @@ export function mergeSettings(stored: Partial<Settings> | null | undefined): Set
     importer: { ...DEFAULT_SETTINGS.importer, ...(s.importer ?? {}) },
     playback: { ...DEFAULT_SETTINGS.playback, ...(s.playback ?? {}) },
     customPresets: Array.isArray(s.customPresets) ? s.customPresets : [],
+    analysis: { ...DEFAULT_SETTINGS.analysis, ...(s.analysis ?? {}) },
     exporter: { ...DEFAULT_SETTINGS.exporter, ...(s.exporter ?? {}) },
     desktop: { ...DEFAULT_SETTINGS.desktop, ...(s.desktop ?? {}) },
     updates: { ...DEFAULT_SETTINGS.updates, ...(s.updates ?? {}) },

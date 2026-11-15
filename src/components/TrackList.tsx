@@ -1,4 +1,4 @@
-import { AlertTriangle, ArrowDown, ArrowUp, Clock3, Cloud, HardDrive, MoreHorizontal, Play, Youtube } from 'lucide-react'
+import { AlertTriangle, ArrowDown, ArrowUp, Clock3, Cloud, Globe, HardDrive, MoreHorizontal, Play, StickyNote, Youtube } from 'lucide-react'
 import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { Track } from '@shared/types'
@@ -22,7 +22,8 @@ function SpotifyMark(): React.JSX.Element {
   )
 }
 
-export function SourceIcon({ source }: { source: Track['source'] }): React.JSX.Element {
+export function SourceIcon({ source, stream }: { source: Track['source']; stream?: boolean }): React.JSX.Element {
+  if (stream) return <Globe size={15} />
   if (source === 'soundcloud') return <Cloud size={15} />
   if (source === 'spotify') return <SpotifyMark />
   if (source === 'youtube') return <Youtube size={15} />
@@ -78,7 +79,7 @@ const Row = memo(function Row(p: RowProps) {
         </button>
       </div>
       <div className="track-row__main">
-        <Cover path={track.coverPath} seed={track.id} size={40} rounded={8} />
+        <Cover path={track.coverPath} url={track.coverUrl} seed={track.id} size={40} rounded={8} />
         <div className="track-row__text">
           <span className="track-row__title">
             {trackTitle(track, t)}
@@ -87,13 +88,23 @@ const Row = memo(function Row(p: RowProps) {
                 <AlertTriangle size={12} />
               </span>
             )}
+            {track.note && (
+              <span className="track-row__note" title={track.note}>
+                <StickyNote size={13} />
+              </span>
+            )}
           </span>
           <span className="track-row__artist">{trackArtist(track, t)}</span>
         </div>
       </div>
       <div className="track-row__album">{track.album}</div>
+      <div className="track-row__bpm" title={track.key ? `${track.key}${track.camelot ? ` · ${track.camelot}` : ''}` : undefined}>
+        {track.bpm ? Math.round(track.bpm) : ''}
+        {track.bpm && track.camelot ? ' · ' : ''}
+        {track.camelot ?? ''}
+      </div>
       <div className="track-row__source" title={track.source}>
-        <SourceIcon source={track.source} />
+        <SourceIcon source={track.source} stream={!!track.stream} />
       </div>
       <div className="track-row__like" onMouseDown={(e) => e.stopPropagation()}>
         <LikeButton trackId={track.id} size={16} />
@@ -228,6 +239,7 @@ export function TrackList({
         <div>#</div>
         {header('title', t('columns.title'))}
         {header('album', t('columns.album'))}
+        {header('bpm', t('columns.bpm'), 'track-list__bpm')}
         <div />
         <div />
         {header('duration', <Clock3 size={15} />, 'track-list__time')}

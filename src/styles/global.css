@@ -896,7 +896,7 @@ select.input option {
 .track-list__head,
 .track-row {
   display: grid;
-  grid-template-columns: 44px minmax(220px, 3fr) minmax(120px, 2fr) 32px 32px 64px 44px;
+  grid-template-columns: 44px minmax(220px, 3fr) minmax(120px, 2fr) 70px 32px 32px 64px 44px;
   align-items: center;
   gap: 12px;
   padding: 0 12px;
@@ -2668,7 +2668,7 @@ kbd {
 @media (max-width: 1180px) {
   .track-list__head,
   .track-row {
-    grid-template-columns: 40px minmax(200px, 1fr) 32px 32px 60px 40px;
+    grid-template-columns: 40px minmax(200px, 1fr) 64px 32px 32px 60px 40px;
   }
   .track-list__head > :nth-child(3),
   .track-row__album {
@@ -3395,6 +3395,156 @@ kbd {
   }
 }
 
+/* Source picker: the current service and an arrow; the list unfolds under it */
+.source-picker {
+  position: relative;
+  flex: none;
+}
+.source-picker__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 44px;
+  padding: 0 10px 0 14px;
+  border-radius: calc(var(--radius) + 2px);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-weight: 600;
+  font-size: 0.92rem;
+  transition:
+    background 0.15s,
+    border-color 0.15s;
+}
+.source-picker__btn:hover,
+.source-picker.is-open .source-picker__btn {
+  background: var(--hover);
+  border-color: var(--border-strong, var(--border));
+}
+.source-picker__chev {
+  color: var(--text-3);
+  transition: transform 0.2s var(--ease);
+}
+.source-picker.is-open .source-picker__chev {
+  transform: rotate(180deg);
+}
+.source-picker__menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  z-index: 30;
+  min-width: 230px;
+  padding: 6px;
+  border-radius: calc(var(--radius) * 0.8 + 2px);
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-lg);
+  animation: pop 0.14s var(--ease);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.source-picker__menu--right {
+  right: 0;
+  transform-origin: top right;
+}
+.source-picker__menu--left {
+  left: 0;
+  transform-origin: top left;
+}
+.source-picker__item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 42px;
+  padding: 6px 10px;
+  border-radius: calc(var(--radius) * 0.55);
+  text-align: left;
+  color: var(--text);
+}
+.source-picker__item:hover,
+.source-picker__item:focus-visible {
+  background: var(--hover);
+  outline: none;
+}
+.source-picker__item.is-active {
+  background: var(--accent-soft);
+}
+.source-picker__text {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.source-picker__text small {
+  color: var(--text-3);
+  font-size: 0.78rem;
+}
+.source-picker__check {
+  color: var(--accent);
+}
+.search-row__text span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.search-row__note {
+  color: var(--text-3);
+  font-size: 0.78rem;
+}
+
+/* Spotify needs the user's own keys */
+.keys-hint {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin: 20px 0;
+}
+.keys-hint > svg {
+  flex: none;
+  color: #1db954;
+}
+.keys-hint > div {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.keys-hint .btn {
+  flex: none;
+}
+
+/* Recommendations */
+.recommend-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+.recommend-because {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: var(--text-2, var(--text-3));
+  font-size: 0.9rem;
+  margin: 0 0 12px;
+  line-height: 1.45;
+}
+.recommend-because svg {
+  flex: none;
+  margin-top: 2px;
+  color: var(--accent);
+}
+
+/* a settings card opened from elsewhere ("add Spotify keys") */
+.settings .card.is-highlighted {
+  box-shadow:
+    0 0 0 3px var(--accent-soft),
+    var(--shadow);
+  transition: box-shadow 0.3s;
+}
+
 /* ───────────── Mini player window ───────────── */
 :root[data-mini='on'] body {
   background: transparent;
@@ -4014,4 +4164,794 @@ kbd {
 .discord-grid__hint {
   margin-bottom: 10px;
   line-height: 1.5;
+}
+
+/* ───────────── Tiles (tracks and online results as a grid) ───────────── */
+.layout-toggle {
+  display: inline-flex;
+  padding: 3px;
+  gap: 2px;
+  border-radius: calc(var(--radius) * 0.7 + 2px);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  flex: none;
+}
+.layout-toggle button {
+  width: 32px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: calc(var(--radius) * 0.55);
+  color: var(--text-3);
+  transition: background 0.15s, color 0.15s;
+}
+.layout-toggle button:hover {
+  color: var(--text);
+}
+.layout-toggle button.is-active {
+  background: var(--surface);
+  color: var(--accent);
+  box-shadow: var(--shadow);
+}
+.tile-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+  gap: 18px 16px;
+  padding-bottom: 16px;
+}
+.tile {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  padding: 10px;
+  border-radius: calc(var(--radius) + 2px);
+  transition: background 0.18s;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 250px;
+}
+.tile:hover,
+.tile.is-previewing {
+  background: var(--hover);
+}
+.tile.is-current {
+  background: var(--accent-softer);
+}
+.tile.is-missing {
+  opacity: 0.5;
+}
+.tile__art {
+  position: relative;
+  aspect-ratio: 1;
+  margin-bottom: 8px;
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--surface-3);
+  box-shadow: var(--shadow);
+  display: block;
+  width: 100%;
+}
+.tile__art img,
+.tile__art > span:first-child,
+.tile__cover {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: cover;
+  border-radius: 0 !important;
+}
+.tile__play {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--accent);
+  color: var(--on-accent);
+  box-shadow: var(--shadow);
+  opacity: 0;
+  transform: translateY(6px);
+  transition: all 0.2s var(--ease);
+}
+.tile:hover .tile__play,
+.tile.is-previewing .tile__play,
+.tile.is-current .tile__play {
+  opacity: 1;
+  transform: none;
+}
+.tile__now {
+  position: absolute;
+  left: 10px;
+  top: 10px;
+  padding: 6px 8px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+}
+.tile__like {
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.tile__like .like-btn {
+  background: rgba(0, 0, 0, 0.4);
+  color: #fff;
+  border-radius: 50%;
+}
+.tile:hover .tile__like,
+.tile__like:has(.is-liked) {
+  opacity: 1;
+}
+.tile strong {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 0.95rem;
+}
+.tile__sub {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-3);
+  font-size: 0.86rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tile__meta,
+.tile__note {
+  color: var(--text-3);
+  font-size: 0.76rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tile__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 2px;
+  margin-top: 4px;
+}
+.tile.is-skeleton .tile__art,
+.tile.is-skeleton > i {
+  background: linear-gradient(90deg, var(--surface-3), var(--hover), var(--surface-3));
+  background-size: 200% 100%;
+  animation: shimmer 1.2s linear infinite;
+  box-shadow: none;
+}
+.tile.is-skeleton > i {
+  display: block;
+  height: 11px;
+  width: 70%;
+  border-radius: 6px;
+  margin-top: 4px;
+}
+.tile.is-skeleton > i + i {
+  width: 45%;
+}
+.icon-btn.is-done {
+  color: var(--success);
+}
+.search-row__actions {
+  display: flex;
+  gap: 2px;
+  opacity: 0.55;
+  transition: opacity 0.15s;
+}
+.search-row:hover .search-row__actions {
+  opacity: 1;
+}
+
+/* ───────────── Track rows: BPM / key, notes ───────────── */
+.track-row__bpm,
+.track-list__bpm {
+  color: var(--text-3);
+  font-size: 0.82rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.track-row__note {
+  display: inline-grid;
+  place-items: center;
+  color: var(--accent);
+  margin-left: 6px;
+  flex: none;
+}
+.note-block {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  max-width: 640px;
+  margin: 2px 0 6px;
+  padding: 8px 12px;
+  border-radius: var(--radius);
+  background: var(--accent-softer);
+  color: var(--text-2);
+  text-align: left;
+  white-space: pre-wrap;
+  line-height: 1.45;
+  font-size: 0.92rem;
+}
+.note-block svg {
+  flex: none;
+  margin-top: 3px;
+  color: var(--accent);
+}
+.note-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 2px 0 6px;
+}
+.input--area {
+  height: auto;
+  min-height: 64px;
+  padding-top: 10px;
+  padding-bottom: 10px;
+  resize: vertical;
+  line-height: 1.45;
+  font-family: inherit;
+}
+.now-playing__note {
+  color: var(--text-2);
+  font-size: 0.92rem;
+  white-space: pre-wrap;
+  max-width: 520px;
+}
+.now-playing__actions {
+  display: flex;
+  gap: 4px;
+}
+
+/* ───────────── Player: radio, songs from the internet ───────────── */
+.player__cover {
+  position: relative;
+}
+.player__resolving {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+}
+.radio-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-right: 6px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 0.72rem;
+  font-weight: 700;
+  vertical-align: 1px;
+}
+.inline-loading {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: 8px;
+}
+
+/* ───────────── For you: My wave, daily mixes ───────────── */
+.wave-card {
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 26px 28px;
+  margin: 4px 0 8px;
+  border-radius: calc(var(--radius) * 1.4 + 4px);
+  color: #fff;
+  background: linear-gradient(120deg, color-mix(in srgb, var(--accent) 85%, #1b0b4a), color-mix(in srgb, var(--accent) 40%, #ff4d8d));
+  box-shadow: var(--shadow-lg);
+}
+.wave-card__glow {
+  position: absolute;
+  inset: -40%;
+  background: radial-gradient(circle at 30% 50%, rgba(255, 255, 255, 0.28), transparent 45%), radial-gradient(circle at 75% 40%, rgba(255, 255, 255, 0.18), transparent 40%);
+  pointer-events: none;
+}
+.wave-card.is-playing .wave-card__glow {
+  animation: wave-drift 8s ease-in-out infinite alternate;
+}
+@keyframes wave-drift {
+  to {
+    transform: translate(8%, -4%) rotate(8deg);
+  }
+}
+.wave-card__text {
+  position: relative;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.wave-card h2 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 1.5rem;
+  font-weight: 800;
+}
+.wave-card p {
+  opacity: 0.85;
+  max-width: 520px;
+}
+.wave-card .btn {
+  position: relative;
+  background: #fff;
+  color: #1b1440;
+}
+.mix-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(176px, 1fr));
+  gap: 18px 16px;
+}
+.mix-card {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  padding: 10px;
+  border-radius: calc(var(--radius) + 2px);
+  cursor: pointer;
+  transition: background 0.18s;
+}
+.mix-card:hover {
+  background: var(--hover);
+}
+.mix-card__art {
+  position: relative;
+  margin-bottom: 8px;
+}
+.mix-card:hover .grid-card__play {
+  opacity: 1;
+  transform: none;
+}
+.mix-card strong {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mix-card small {
+  color: var(--text-3);
+  font-size: 0.84rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mix-collage {
+  position: relative;
+  aspect-ratio: 1;
+  width: 100%;
+  border-radius: var(--radius);
+  overflow: hidden;
+  box-shadow: var(--shadow);
+}
+.mix-collage--lg {
+  width: 196px;
+  height: 196px;
+  flex: none;
+  border-radius: 20px;
+  box-shadow: var(--shadow-lg);
+}
+.mix-collage__grid {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+.mix-collage__cover,
+.mix-collage__single {
+  width: 100% !important;
+  height: 100% !important;
+  border-radius: 0 !important;
+  object-fit: cover;
+}
+.mix-collage__single {
+  position: absolute;
+  inset: 0;
+}
+.mix-collage__wash {
+  position: absolute;
+  inset: 0;
+  opacity: 0.55;
+  mix-blend-mode: multiply;
+}
+.mix-collage__label {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 12px;
+  color: #fff;
+  font-weight: 800;
+  font-size: 1.05rem;
+  line-height: 1.15;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.45);
+}
+.foryou .section-title small {
+  font-size: 0.82rem;
+  font-weight: 500;
+  margin-left: 8px;
+}
+.recommend-bar .section-title {
+  margin: 0;
+}
+.foryou .recommend-bar {
+  margin-top: 30px;
+}
+
+/* ───────────── Smart playlists ───────────── */
+.sidebar__section--sub {
+  padding: 14px 2px 4px 12px;
+}
+.playlist-cover--smart {
+  width: 32px;
+  height: 32px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  color: #fff;
+  background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 50%, #ff4d8d));
+}
+.smart-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.smart-editor__match {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.smart-editor__match .input--sm {
+  min-width: 0;
+  width: auto;
+}
+.smart-editor__rules {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+.rule-row {
+  display: grid;
+  grid-template-columns: minmax(150px, 1.2fr) minmax(120px, 1fr) minmax(90px, 1fr) auto auto;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+}
+.rule-row .input--sm {
+  min-width: 0;
+  width: 100%;
+}
+.rule-row__unit {
+  color: var(--text-3);
+  font-size: 0.86rem;
+}
+.smart-editor__order {
+  display: grid;
+  grid-template-columns: 1fr 1fr 120px;
+  gap: 12px;
+}
+.modal__count {
+  margin-right: auto;
+  align-self: center;
+}
+
+/* ───────────── Statistics: genres, decades ───────────── */
+.share-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.share-row {
+  display: grid;
+  grid-template-columns: 130px 1fr 80px;
+  align-items: center;
+  gap: 12px;
+}
+.share-row__label {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.share-row__bar {
+  height: 10px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  overflow: hidden;
+}
+.share-row__bar span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+}
+.share-row small {
+  color: var(--text-3);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.decade-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  height: 160px;
+  padding-top: 8px;
+}
+.decade-bars__col {
+  flex: 1;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 6px;
+  max-width: 64px;
+}
+.decade-bars__bar {
+  width: 100%;
+  border-radius: 8px 8px 4px 4px;
+  background: linear-gradient(180deg, var(--accent), color-mix(in srgb, var(--accent) 55%, transparent));
+}
+.decade-bars__col small {
+  color: var(--text-3);
+  font-size: 0.8rem;
+}
+
+/* ───────────── Settings: sound check ───────────── */
+.sound-check {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+.sound-check__report {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  font-size: 0.8rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  user-select: text;
+  max-width: 380px;
+}
+@media (max-width: 1060px) {
+  .rule-row {
+    grid-template-columns: 1fr 1fr;
+  }
+  .smart-editor__order {
+    grid-template-columns: 1fr 1fr;
+  }
+  .wave-card {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+/* a tile without a cover keeps its note icon centred */
+.tile__art > .cover--empty,
+.mix-collage .cover--empty {
+  display: grid !important;
+  place-items: center;
+}
+.tile__art > .cover--empty svg {
+  width: 30%;
+  height: 30%;
+  opacity: 0.85;
+}
+.smart-editor__order {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 120px;
+}
+.smart-editor__order .input,
+.smart-editor__order select {
+  width: 100%;
+  min-width: 0;
+}
+.rule-row > span:empty {
+  display: block;
+}
+.wave-card .btn,
+.wave-card .btn:hover,
+.wave-card .btn:focus-visible {
+  background: #fff;
+  color: #1b1440;
+}
+.wave-card .btn:hover {
+  filter: brightness(0.96);
+}
+
+/* ───────────── 👍 / 👎 ───────────── */
+.rate {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.rate .icon-btn.is-on {
+  opacity: 1;
+}
+.rate__up.is-on {
+  color: var(--success);
+}
+.rate__down.is-on {
+  color: var(--danger);
+}
+.ratings-tabs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+.ratings-tabs .chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.ratings-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 320px;
+  overflow-y: auto;
+  margin-top: 10px;
+  padding-right: 4px;
+}
+.ratings-list li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 8px;
+  border-radius: calc(var(--radius) * 0.6);
+}
+.ratings-list li:hover {
+  background: var(--hover);
+}
+.ratings-list__text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.ratings-list__text strong,
+.ratings-list__text small {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ratings-list__text small {
+  color: var(--text-3);
+}
+
+/* ───────────── My wave: mode and source ───────────── */
+.wave-card__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+}
+.wave-seg {
+  display: inline-flex;
+  padding: 3px;
+  gap: 2px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+}
+.wave-seg button {
+  padding: 6px 14px;
+  border-radius: 999px;
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 0.86rem;
+  font-weight: 650;
+  transition: background 0.15s, color 0.15s;
+}
+.wave-seg button:hover {
+  color: #fff;
+}
+.wave-seg button.is-active {
+  background: #fff;
+  color: #1b1440;
+}
+.wave-source {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.86rem;
+  color: rgba(255, 255, 255, 0.85);
+}
+.wave-source select {
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 0;
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+  font: inherit;
+  font-weight: 650;
+}
+.wave-source select option {
+  color: #1b1440;
+  background: #fff;
+}
+.recommend-group {
+  margin: 18px 0 8px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-3);
+}
+
+/* ───────────── Lyrics: word by word, tools ───────────── */
+.lyrics__words {
+  display: inline;
+}
+.lyrics__word {
+  background: linear-gradient(90deg, var(--text) var(--fill, 0%), color-mix(in srgb, var(--text) 34%, transparent) calc(var(--fill, 0%) + 12%));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.lyrics__foot {
+  flex-wrap: wrap;
+}
+.lyrics__tools {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.lyrics__chip {
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  font-size: 0.74rem;
+  color: var(--text-3);
+  transition: all 0.15s;
+}
+.lyrics__chip:hover {
+  color: var(--text);
+}
+.lyrics__chip.is-on {
+  background: var(--accent-soft);
+  border-color: transparent;
+  color: var(--accent);
+}
+.lyrics__offset {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.lyrics__offset .icon-btn {
+  width: 24px;
+  height: 24px;
+}
+.lyrics__offset-value {
+  min-width: 52px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-2);
+  font-size: 0.74rem;
 }

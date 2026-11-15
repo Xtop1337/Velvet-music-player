@@ -25,6 +25,14 @@ pub struct Track {
     pub track_no: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub year: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub genre: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bpm: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub camelot: Option<String>,
 }
 
 /// The few strings shown outside the web UI (Discord, tray). The UI sends them in the
@@ -79,6 +87,8 @@ pub struct NowPlaying {
     pub artist: String,
     pub album: String,
     pub cover_url: Option<String>,
+    /// the cover cached on disk (uploaded for Discord when nothing is found online)
+    pub cover_path: Option<String>,
     pub source_url: Option<String>,
     pub duration: f64,
     pub position: f64,
@@ -97,6 +107,23 @@ pub struct ImportOptions {
     pub format: String,
     pub spotify_client_id: Option<String>,
     pub spotify_client_secret: Option<String>,
+    /// download a song known by its metadata (recommendations, radio): its audio is found on
+    /// YouTube / SoundCloud; `url` then is the page the song was found on (e.g. Deezer)
+    pub matched: Option<MatchMeta>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct MatchMeta {
+    pub title: String,
+    pub artist: String,
+    pub album: String,
+    pub duration: f64,
+    pub cover_url: Option<String>,
+    /// a YouTube / SoundCloud page already known for it
+    pub page: Option<String>,
+    /// "youtube" | "soundcloud": where to look first
+    pub prefer: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -144,6 +171,10 @@ pub struct LyricsResult {
     pub instrumental: Option<bool>,
     /// tags | lrclib | user | none
     pub source: String,
+    /// length (s) of the recording the timestamps were made for; a slowed / sped-up file
+    /// differs from it, and the UI stretches the timestamps to fit
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub duration: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }
@@ -204,6 +235,20 @@ pub struct SearchResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thumbnail: Option<String>,
     pub source: String,
+    /// 30-second preview that plays at once (recommendations)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preview: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub album: Option<String>,
+    /// a larger cover (the player, Discord)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cover_big: Option<String>,
+    /// the user's artist this suggestion comes from ("because you listen to …")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub because: Option<String>,
+    /// the genre the service itself gives the song (SoundCloud does)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub genre: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -214,6 +259,9 @@ pub struct RemoteState {
     pub artist: String,
     pub album: String,
     pub cover_path: Option<String>,
+    /// a public cover (songs played from the internet)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cover_url: Option<String>,
     pub playing: bool,
     pub position: f64,
     pub duration: f64,

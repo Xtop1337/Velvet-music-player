@@ -1,5 +1,6 @@
-//! Linux only: WebKitGTK's media player cannot read custom URI schemes, so audio and video
-//! are streamed from a loopback HTTP server instead (Windows' WebView2 uses `velvet://`).
+//! Loopback HTTP server for local files. On Linux WebKitGTK's media player cannot read custom
+//! URI schemes, so audio and video are streamed from here (Windows' WebView2 uses `velvet://`);
+//! on Windows it serves the covers of the system media overlay (see remote.rs).
 //!
 //! Only 127.0.0.1, only media file types, and every URL carries a random 128-bit token, so
 //! other local programs and web pages can't use it to read files.
@@ -20,12 +21,19 @@ pub async fn start() -> Result<String, String> {
     if let Some(b) = base() {
         return Ok(b);
     }
-    let listener = TcpListener::bind("127.0.0.1:0").await.map_err(|e| e.to_string())?;
-    let port = listener.local_addr().map_err(|e| e.to_string())?.port();
+    static STARTING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    let _one = STARTING.lock().await;
+    if let Some(b) = base() {
+        return Ok(b);
+    }
+    let std_listener = std::net::TcpListener::bind("127.0.0.1:0").map_err(|e| e.to_string())?;
+    std_listener.set_nonblocking(true).map_err(|e| e.to_string())?;
+    let port = std_listener.local_addr().map_err(|e| e.to_string())?.port();
     let token = uuid::Uuid::new_v4().simple().to_string();
     let base = format!("http://127.0.0.1:{port}/{token}/");
-    let _ = BASE.set(base.clone());
-    tokio::spawn(async move {
+    // on the app-wide runtime: it outlives whoever asked first
+    tauri::async_runtime::spawn(async move {
+        let Ok(listener) = TcpListener::from_std(std_listener) else { return };
         while let Ok((sock, _)) = listener.accept().await {
             let token = token.clone();
             tokio::spawn(async move {
@@ -33,10 +41,11 @@ pub async fn start() -> Result<String, String> {
             });
         }
     });
+    let _ = BASE.set(base.clone());
     Ok(base)
 }
 
-async fn respond(sock: &mut TcpStream, status: &str, headers: &[(String, String)]) -> std::io::Result<()> {
+pub async fn respond(sock: &mut TcpStream, status: &str, headers: &[(String, String)]) -> std::io::Result<()> {
     let mut head =
         format!("HTTP/1.1 {status}\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Headers: *\r\nConnection: close\r\n");
     for (k, v) in headers {
@@ -73,6 +82,13 @@ async fn serve(mut sock: TcpStream, token: &str) -> std::io::Result<()> {
     let Some(rest) = path.strip_prefix(&format!("/{token}/")) else {
         return respond(&mut sock, "403 Forbidden", &[("Content-Length".into(), "0".into())]).await;
     };
+    // the UI checks it can reach the server before streaming from it (Windows)
+    if rest == "ping" {
+        return respond(&mut sock, "204 No Content", &[("Content-Length".into(), "0".into())]).await;
+    }
+    if let Some(id) = rest.strip_prefix("stream/") {
+        return crate::stream::proxy(&mut sock, method, id, range.as_deref()).await;
+    }
     let file = protocol::path_from_uri(rest);
     let ext = media::ext(std::path::Path::new(&file));
     if !media::servable(&ext) {

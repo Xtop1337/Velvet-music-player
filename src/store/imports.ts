@@ -1,5 +1,6 @@
 import { create } from 'zustand'
-import type { ImportProgress, Track, YtDlpStatus } from '@shared/types'
+import type { ImportProgress, MatchMeta, Track, YtDlpStatus } from '@shared/types'
+import { trackKey } from '@renderer/lib/recommend'
 import { useLibrary } from './library'
 import { useSettings } from './settings'
 
@@ -7,11 +8,32 @@ interface ImportState {
   jobs: ImportProgress[]
   ytdlp: YtDlpStatus | null
   installing: boolean
-  start: (url: string) => Promise<string>
+  /** `matched`: a song known by its metadata (its audio is looked up) */
+  start: (url: string, matched?: MatchMeta) => Promise<string>
   cancel: (jobId: string) => void
   clearFinished: () => void
   refreshYtdlp: () => Promise<void>
   installYtdlp: () => Promise<void>
+}
+
+/** Songs (by `trackKey`) to like as soon as their download arrives. */
+const likeOnArrival = new Set<string>()
+
+/** Downloads a song from the internet (radio, mixes) into the library; `like` likes the copy. */
+export function downloadStreamTrack(t: Track, like = false): Promise<string> | null {
+  if (!t.stream) return null
+  if (like) likeOnArrival.add(trackKey(t.artist, t.title))
+  const url = t.stream.link ?? t.stream.page ?? ''
+  if (!url) return null
+  return useImports.getState().start(url, {
+    title: t.title,
+    artist: t.artist,
+    album: t.album,
+    duration: t.duration,
+    coverUrl: t.coverUrl,
+    page: t.stream.page,
+    prefer: t.stream.prefer
+  })
 }
 
 /** Jobs whose finished tracks have already been turned into a playlist. */
@@ -21,14 +43,15 @@ export const useImports = create<ImportState>((set, get) => ({
   jobs: [],
   ytdlp: null,
   installing: false,
-  start: async (url) => {
+  start: async (url, matched) => {
     const s = useSettings.getState().settings.importer
     const jobId = await window.velvet.importer.start({
       url,
       downloadDir: s.downloadDir,
       format: s.format,
       spotifyClientId: s.spotifyClientId,
-      spotifyClientSecret: s.spotifyClientSecret
+      spotifyClientSecret: s.spotifyClientSecret,
+      matched
     })
     return jobId
   },
@@ -62,9 +85,13 @@ export function bindImportEvents(onFinished: (job: ImportProgress) => void): () 
   })
   const offTrack = window.velvet.importer.onTrack((_jobId: string, track: Track) => {
     useLibrary.getState().addTracks([track])
+    // a song from the internet liked while playing: the downloaded copy is liked too
+    const key = trackKey(track.artist, track.title)
+    if (likeOnArrival.delete(key)) useLibrary.getState().updateTrack(track.id, { liked: true, likedAt: Date.now() })
   })
   return () => {
     offProgress()
     offTrack()
   }
 }
+

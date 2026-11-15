@@ -1,16 +1,17 @@
 import i18n from 'i18next'
 import { create } from 'zustand'
 import { BUILTIN_PRESETS, RATE_MAX, RATE_MIN, VOLUME_MAX } from '@shared/defaults'
-import type { Preset, RepeatMode, Settings } from '@shared/types'
+import type { Preset, RepeatMode, Settings, SoundSettings, Track } from '@shared/types'
 import { engine, type Fx } from '@renderer/audio/engine'
 import { planTransition, secondsUntilNextStage } from '@renderer/audio/transition'
 import { clamp, shuffleArray } from '@renderer/lib/format'
-import { streamUrl } from '@renderer/lib/media'
+import { logUi } from '@renderer/lib/diag'
+import { altStreamUrl, currentTransport, remoteStreamUrl, streamUrl, switchTransport } from '@renderer/lib/media'
 import { useLibrary } from './library'
 import { useSettings } from './settings'
 import { useUi } from './ui'
 
-interface Sound {
+export interface Sound {
   rate: number
   preservesPitch: boolean
   fx: Fx
@@ -32,6 +33,10 @@ interface PlayerState extends Sound {
   repeat: RepeatMode
   /** Sound settings to restore after a track with its own preset. */
   restoreSound: Sound | null
+  /** a song from the internet is being looked up */
+  resolving: boolean
+  /** the last time the user skipped a song (radio learns from quick skips) */
+  lastSkip: { id: string; position: number; at: number } | null
 
   init: (p: Settings['playback']) => void
   /** Restores the last queue and position (without starting playback). */
@@ -50,6 +55,8 @@ interface PlayerState extends Sound {
   setPreservesPitch: (on: boolean) => void
   setFx: (fx: Partial<Fx>) => void
   applyPreset: (p: Preset, fromTrack?: boolean) => void
+  /** Binds the current speed and effects to the current track (or removes the binding). */
+  bindCurrent: (on: boolean) => void
   setShuffle: (on: boolean) => void
   cycleRepeat: () => void
   enqueue: (ids: string[]) => void
@@ -86,13 +93,114 @@ function applySound(s: Sound): void {
   engine.setFx(s.fx)
 }
 
+function presetSound(p: Preset): Sound {
+  return {
+    rate: clamp(p.rate, RATE_MIN, RATE_MAX),
+    preservesPitch: p.preservesPitch,
+    fx: { reverb: p.reverb, bass: p.bass, mid: p.mid, treble: p.treble },
+    activePresetId: p.id
+  }
+}
+
+/** The speed and effects bound to a track: its preset, else its own sound; `null` when none. */
+export function trackSound(track: Pick<Track, 'presetId' | 'sound'> | undefined): Sound | null {
+  if (!track) return null
+  const preset = track.presetId ? allPresets().find((p) => p.id === track.presetId) : undefined
+  if (preset) return presetSound(preset)
+  if (!track.sound) return null
+  const s = presetSound({ id: '', name: '', ...track.sound })
+  return { ...s, activePresetId: detectPreset(s) }
+}
+
+/** How a sound is stored on a track: as the preset it matches, or as its own values. */
+export function bindingFor(s: Sound): Pick<Track, 'presetId' | 'sound'> {
+  if (s.activePresetId && allPresets().some((p) => p.id === s.activePresetId)) return { presetId: s.activePresetId, sound: undefined }
+  const sound: SoundSettings = { rate: s.rate, preservesPitch: s.preservesPitch, ...s.fx }
+  return { presetId: undefined, sound }
+}
+
+// slider drags change the sound many times a second: the bound track is written once it settles
+let pendingBind: { id: string; sound: Sound } | null = null
+let bindTimer: number | null = null
+function flushBinding(): void {
+  if (bindTimer) clearTimeout(bindTimer)
+  bindTimer = null
+  const p = pendingBind
+  pendingBind = null
+  if (p) useLibrary.getState().updateTrack(p.id, bindingFor(p.sound))
+}
+function saveBinding(trackId: string, s: Sound): void {
+  if (pendingBind && pendingBind.id !== trackId) flushBinding()
+  pendingBind = { id: trackId, sound: s }
+  if (bindTimer) clearTimeout(bindTimer)
+  bindTimer = window.setTimeout(flushBinding, 300)
+}
+function dropBinding(): void {
+  if (bindTimer) clearTimeout(bindTimer)
+  bindTimer = null
+  pendingBind = null
+}
+function isBound(trackId: string | null): boolean {
+  return !!trackId && (pendingBind?.id === trackId || !!trackSound(useLibrary.getState().tracks[trackId]))
+}
+
 let loadToken = 0
+
+/**
+ * Where a track's audio comes from: its file, or — for a song from the internet — a stream
+ * Velvet relays (found on YouTube / SoundCloud the first time, then remembered for hours).
+ */
+export async function sourceUrl(track: Track, fresh = false): Promise<string> {
+  return (await sourceOf(track, fresh)).url
+}
+
+/** Like `sourceUrl`, with the stream id of a song from the internet (for downloading it ahead). */
+async function sourceOf(track: Track, fresh = false): Promise<{ url: string; streamId?: string }> {
+  if (!track.stream) return { url: streamUrl(track.path) }
+  const info = await window.velvet.stream.resolve({
+    title: track.title,
+    artist: track.artist,
+    duration: track.duration,
+    page: track.stream.page,
+    prefer: track.stream.prefer,
+    fresh
+  })
+  if (track.stream.page !== info.page) useLibrary.getState().updateTrack(track.id, { stream: { ...track.stream, page: info.page } })
+  return { url: remoteStreamUrl(info.id), streamId: info.id }
+}
 const SESSION_KEY = 'velvet.session'
 
 export const usePlayer = create<PlayerState>((set, get) => {
   const sound = (): Sound => {
     const { rate, preservesPitch, fx, activePresetId } = get()
     return { rate, preservesPitch, fx, activePresetId }
+  }
+
+  /** A track's own preset or sound; after such a track, the user's own sound comes back. */
+  function applyTrackSound(track: Track): void {
+    const bound = trackSound(track)
+    if (bound) {
+      if (!get().restoreSound) set({ restoreSound: sound() })
+      applySound(bound)
+      set(bound)
+    } else if (get().restoreSound) {
+      const s = get().restoreSound!
+      set({ ...s, restoreSound: null })
+      applySound(s)
+    }
+  }
+
+  /**
+   * A change made in the speed panel. While the current track has a binding the change is
+   * saved to it (the user's own sound still returns after the track); otherwise it becomes
+   * the user's sound for every track.
+   */
+  function commitSound(next: Sound): void {
+    const id = get().currentId
+    if (id && isBound(id)) {
+      saveBinding(id, next)
+      set(next)
+    } else set({ ...next, restoreSound: null })
   }
 
   async function load(index: number, autoplay: boolean, overlap = 0): Promise<void> {
@@ -102,30 +210,33 @@ export const usePlayer = create<PlayerState>((set, get) => {
     if (!track) return
     const token = ++loadToken
 
-    // per-track preset
-    const presetId = track.presetId
-    const preset = presetId ? allPresets().find((p) => p.id === presetId) : undefined
-    if (preset) {
-      if (!get().restoreSound) set({ restoreSound: sound() })
-      get().applyPreset(preset, true)
-    } else if (get().restoreSound) {
-      const s = get().restoreSound!
-      set({ ...s, restoreSound: null })
-      applySound(s)
+    flushBinding()
+    applyTrackSound(track)
+    set({ index, currentId: id, position: 0, duration: track.duration || 0, resolving: !!track.stream })
+    let url: string
+    try {
+      url = await sourceUrl(track)
+    } catch (e) {
+      if (token !== loadToken) return
+      set({ resolving: false, playing: false })
+      reportPlayError(id, String(e).includes('no-match') ? i18n.t('search.noMatch') : String(e))
+      // a radio keeps going with the next song (not "next": with repeat-one it would retry this one)
+      if (autoplay && get().index + 1 < get().queue.length) void get().jumpTo(get().index + 1)
+      return
     }
-
-    set({ index, currentId: id, position: 0, duration: track.duration || 0 })
+    if (token !== loadToken) return
+    set({ resolving: false })
     if (overlap > 0 && !engine.paused) {
       try {
-        await engine.crossfadeTo(streamUrl(track.path), overlap)
+        await engine.crossfadeTo(url, overlap)
       } catch {
         // fall back to a normal switch below
-        if (token === loadToken) await engine.load(streamUrl(track.path))
+        if (token === loadToken) await engine.load(url)
         else return
       }
       return
     }
-    await engine.load(streamUrl(track.path))
+    await engine.load(url)
     if (token !== loadToken) return
     if (autoplay) {
       try {
@@ -155,6 +266,8 @@ export const usePlayer = create<PlayerState>((set, get) => {
     fx: { reverb: 0, bass: 0, mid: 0, treble: 0 },
     activePresetId: 'normal',
     restoreSound: null,
+    resolving: false,
+    lastSkip: null,
 
     init: (p) => {
       const s: Sound = {
@@ -166,6 +279,7 @@ export const usePlayer = create<PlayerState>((set, get) => {
       set({ ...s, volume: clamp(p.volume, 0, VOLUME_MAX), shuffle: p.shuffle, repeat: p.repeat })
       applySound(s)
       engine.setVolume(clamp(p.volume, 0, VOLUME_MAX))
+      if (p.simpleAudio) void engine.setOutput('direct', 'setting')
     },
 
     restore: async () => {
@@ -182,6 +296,7 @@ export const usePlayer = create<PlayerState>((set, get) => {
       const index = queue.indexOf(id)
       if (index < 0) return
       const position = Math.max(0, saved.position ?? 0)
+      applyTrackSound(tracks[id])
       set({ queue, original: queue, index, currentId: id, duration: tracks[id].duration, position })
       await engine.load(streamUrl(tracks[id].path), position)
     },
@@ -223,8 +338,9 @@ export const usePlayer = create<PlayerState>((set, get) => {
     pause: () => engine.pause(),
 
     next: async (auto = false) => {
-      const { index, queue, repeat } = get()
+      const { index, queue, repeat, currentId } = get()
       if (!queue.length) return
+      if (!auto && currentId) set({ lastSkip: { id: currentId, position: engine.currentTime, at: Date.now() } })
       if (auto && repeat === 'one') {
         engine.seek(0)
         await engine.play()
@@ -267,29 +383,35 @@ export const usePlayer = create<PlayerState>((set, get) => {
     setRate: (r) => {
       const rate = clamp(Math.round(r * 100) / 100, RATE_MIN, RATE_MAX)
       engine.setRate(rate)
-      set({ rate, activePresetId: detectPreset({ ...sound(), rate }), restoreSound: null })
+      const next = { ...sound(), rate }
+      commitSound({ ...next, activePresetId: detectPreset(next) })
     },
 
     setPreservesPitch: (on) => {
       engine.setPreservesPitch(on)
-      set({ preservesPitch: on, activePresetId: detectPreset({ ...sound(), preservesPitch: on }), restoreSound: null })
+      const next = { ...sound(), preservesPitch: on }
+      commitSound({ ...next, activePresetId: detectPreset(next) })
     },
 
     setFx: (patch) => {
       const fx = { ...get().fx, ...patch }
       engine.setFx(fx)
-      set({ fx, activePresetId: detectPreset({ ...sound(), fx }), restoreSound: null })
+      const next = { ...sound(), fx }
+      commitSound({ ...next, activePresetId: detectPreset(next) })
     },
 
     applyPreset: (p, fromTrack = false) => {
-      const s: Sound = {
-        rate: clamp(p.rate, RATE_MIN, RATE_MAX),
-        preservesPitch: p.preservesPitch,
-        fx: { reverb: p.reverb, bass: p.bass, mid: p.mid, treble: p.treble },
-        activePresetId: p.id
-      }
+      const s = presetSound(p)
       applySound(s)
-      set(fromTrack ? s : { ...s, restoreSound: null })
+      if (fromTrack) set(s)
+      else commitSound(s)
+    },
+
+    bindCurrent: (on) => {
+      const id = get().currentId
+      if (!id) return
+      dropBinding()
+      useLibrary.getState().updateTrack(id, on ? bindingFor(sound()) : { presetId: undefined, sound: undefined })
     },
 
     setShuffle: (on) => {
@@ -386,7 +508,10 @@ function planNext(): void {
     })
     return
   }
-  if (plan.action === 'preload') engine.preload(streamUrl(track.path))
+  if (plan.action === 'preload') {
+    if (track.stream) void sourceUrl(track).catch(() => {})
+    else engine.preload(streamUrl(track.path))
+  }
   const wait = secondsUntilNextStage(opts)
   if (Number.isFinite(wait)) transitionTimer = window.setTimeout(planNext, Math.max(10, wait * 1000))
 }
@@ -398,19 +523,110 @@ useSettings.subscribe((s, prev) => {
   if (s.settings.playback.crossfade !== prev.settings.playback.crossfade || s.settings.playback.gapless !== prev.settings.playback.gapless) planNext()
 })
 
+// ── the next track is made ready while the current one plays ────────────────────
+// A few seconds into a track the next one is prepared: a song from the internet is looked up and
+// downloaded into a temporary file, and whatever comes next is buffered on the standby deck, so
+// the change of tracks has no pause (with or without crossfade). The song after it is looked up too.
+let prepareTimer: number | null = null
+let prepareSeq = 0
+
+function nextIndexFor(s: Pick<PlayerState, 'index' | 'queue' | 'repeat'>): number {
+  if (s.index < 0) return -1
+  if (s.index + 1 < s.queue.length) return s.index + 1
+  return s.repeat === 'all' && s.queue.length > 1 ? 0 : -1
+}
+
+async function prepareNext(): Promise<void> {
+  const seq = ++prepareSeq
+  const st = usePlayer.getState()
+  const next = nextIndexFor(st)
+  if (next < 0 || st.repeat === 'one') return
+  const tracks = useLibrary.getState().tracks
+  const track = tracks[st.queue[next]]
+  if (!track) return
+  const t0 = performance.now()
+  try {
+    const src = await sourceOf(track)
+    if (src.streamId) await window.velvet.stream.prefetch(src.streamId)
+    const now = usePlayer.getState()
+    // still the next track, and no transition is using the standby deck
+    if (seq === prepareSeq && now.queue[nextIndexFor(now)] === track.id && !transitioning) {
+      engine.preload(src.url)
+      if (track.stream) logUi('info', `next song ready in ${Math.round(performance.now() - t0)} ms`)
+    }
+  } catch {
+    // it will be looked up again when its turn comes
+  }
+  // …and the song after it only needs its link
+  const after = tracks[st.queue[next + 1]]
+  if (after?.stream && seq === prepareSeq) void sourceOf(after).catch(() => {})
+}
+
+function schedulePrepare(): void {
+  if (prepareTimer) clearTimeout(prepareTimer)
+  prepareTimer = window.setTimeout(() => {
+    prepareTimer = null
+    if (usePlayer.getState().playing) void prepareNext()
+  }, 3000)
+}
+engine.on('playing', schedulePrepare)
+usePlayer.subscribe((s, prev) => {
+  if (s.currentId !== prev.currentId || s.queue !== prev.queue || s.repeat !== prev.repeat) schedulePrepare()
+})
+
 let errorStreak = 0
+/** tracks already retried over the other transport this session */
+const altTried = new Set<string>()
 engine.on('playing', () => (errorStreak = 0))
 engine.on('error', () => {
-  const { queue, currentId } = usePlayer.getState()
-  usePlayer.setState({ playing: false })
+  const { queue, currentId, position } = usePlayer.getState()
   if (!engine.audio.getAttribute('src')) return
   const err = engine.audio.error
+  const track = currentId ? useLibrary.getState().tracks[currentId] : undefined
+  const ext = track?.path.split('.').pop()?.toLowerCase() ?? '?'
+  engine.lastProblem = `media error ${err?.code ?? '?'} ${err?.message ?? ''}`.trim()
+  logUi('warn', `${engine.lastProblem} (.${ext}, ${track?.stream ? 'internet' : currentTransport()})`)
+  // a song from the internet: its link may have expired — look it up once more
+  if (track?.stream && !altTried.has(track.id)) {
+    altTried.add(track.id)
+    void (async () => {
+      try {
+        // a new direct link for the same page (the old one expired or was refused)
+        await engine.load(await sourceUrl(track, true), position)
+        await engine.play()
+      } catch {
+        // the error event of the second attempt reports it
+      }
+    })()
+    return
+  }
+  // the same file over the other transport (Windows: loopback server ↔ velvet protocol)
+  const alt = track && !track.stream ? altStreamUrl(track.path) : null
+  if (track && alt && !altTried.has(track.id)) {
+    altTried.add(track.id)
+    void (async () => {
+      try {
+        await engine.load(alt, position)
+        await engine.play()
+        switchTransport()
+      } catch {
+        // the error event of the second attempt reports it
+      }
+    })()
+    return
+  }
+  usePlayer.setState({ playing: false })
   if (errorStreak === 0 && currentId) reportPlayError(currentId, err ? i18n.t(`player.mediaErrors.${err.code}`, { defaultValue: err.message || String(err.code) }) : '')
   // skip unplayable files, but don't loop forever over a broken queue
   if (++errorStreak < Math.min(queue.length, 5)) void usePlayer.getState().next(true)
 })
 
 let lastReport = { id: '', at: 0 }
+
+// playback moved to the plain element by itself: say so (effects and >100% are off there)
+engine.on('mode', () => {
+  if (engine.mode === 'direct' && engine.modeReason !== 'setting') useUi.getState().toast(i18n.t('player.simpleAudioAuto'), 'info')
+})
 
 /** Says why a track didn't start instead of pretending it plays (once per track and failure). */
 function reportPlayError(trackId: string, reason: string): void {
@@ -471,3 +687,5 @@ window.setInterval(() => {
   if (usePlayer.getState().playing) saveSession()
 }, 5000)
 window.addEventListener('velvet:flush', saveSession)
+// capture: runs before the library's own flush listener, so a binding still pending is saved with it
+window.addEventListener('velvet:flush', flushBinding, { capture: true })

@@ -104,17 +104,39 @@ export function tracksOfArtist(name: string, ids: string[], tracks: Record<strin
   return ids.filter((id) => tracks[id] && splitArtists(tracks[id].artist).some((a) => a.toLowerCase() === k))
 }
 
-export type SortKey = 'added' | 'title' | 'artist' | 'album' | 'duration' | 'plays'
+export type SortKey = 'added' | 'title' | 'artist' | 'album' | 'duration' | 'plays' | 'bpm' | 'key'
+
+/** "8A" → 15 (1A, 1B, 2A, 2B, … 12B): neighbours on the Camelot wheel sort next to each other. */
+export function camelotRank(c: string | undefined): number {
+  const m = c ? /^(\d{1,2})([AB])$/i.exec(c.trim()) : null
+  if (!m) return Number.POSITIVE_INFINITY
+  return (Number(m[1]) - 1) * 2 + (m[2].toUpperCase() === 'B' ? 1 : 0)
+}
 
 export function sortTracks(ids: string[], tracks: Record<string, Track>, key: SortKey, desc: boolean): string[] {
   if (key === 'added') return desc ? ids : [...ids].reverse()
   const val = (t: Track): string | number =>
-    key === 'title' ? t.title : key === 'artist' ? t.artist : key === 'album' ? t.album : key === 'duration' ? t.duration : (t.playCount ?? 0)
+    key === 'title'
+      ? t.title
+      : key === 'artist'
+        ? t.artist
+        : key === 'album'
+          ? t.album
+          : key === 'duration'
+            ? t.duration
+            : key === 'bpm'
+              ? (t.bpm ?? Number.POSITIVE_INFINITY)
+              : key === 'key'
+                ? camelotRank(t.camelot)
+                : (t.playCount ?? 0)
+  const unknown = (v: string | number): boolean => v === Number.POSITIVE_INFINITY
   const sorted = [...ids].sort((a, b) => {
     const va = val(tracks[a])
     const vb = val(tracks[b])
+    // tracks without a BPM / key stay at the end in both directions
+    if (unknown(va) || unknown(vb)) return unknown(va) === unknown(vb) ? tracks[a].title.localeCompare(tracks[b].title) : unknown(va) ? 1 : -1
     const c = typeof va === 'number' ? va - (vb as number) : va.localeCompare(vb as string, undefined, { sensitivity: 'base' })
-    return c || tracks[a].title.localeCompare(tracks[b].title)
+    return (desc ? -c : c) || tracks[a].title.localeCompare(tracks[b].title)
   })
-  return desc ? sorted.reverse() : sorted
+  return sorted
 }

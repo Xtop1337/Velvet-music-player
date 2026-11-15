@@ -6,6 +6,7 @@ import './styles/themes.css'
 import './styles/global.css'
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
+import { captureErrors } from './lib/diag'
 import { initMedia } from './lib/media'
 
 const root = createRoot(document.getElementById('root')!)
@@ -20,6 +21,7 @@ if (location.hash === '#mini') {
     )
   )
 } else {
+  captureErrors()
   void Promise.all([import('./i18n'), import('./App'), initMedia()]).then(([, { App }]) =>
     root.render(
       <StrictMode>

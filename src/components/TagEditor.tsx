@@ -1,11 +1,14 @@
 import { ClipboardPaste, ImagePlus, Link2, Trash2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { presetLabel } from '@renderer/lib/tracks'
+import { ownSoundLabel, presetLabel } from '@renderer/lib/tracks'
 import { useLibrary } from '@renderer/store/library'
 import { allPresets } from '@renderer/store/player'
 import { useUi } from '@renderer/store/ui'
 import { Button, Cover, Field, Modal, Toggle } from './ui'
+
+/** Select value for the track's own bound speed (not a preset). */
+const OWN = '__own'
 
 export function TagEditor(): React.JSX.Element | null {
   const { t } = useTranslation()
@@ -21,6 +24,8 @@ export function TagEditor(): React.JSX.Element | null {
   const [coverUrl, setCoverUrl] = useState('')
   const [presetId, setPresetId] = useState('')
   const [lyrics, setLyrics] = useState('')
+  const [genre, setGenre] = useState('')
+  const [note, setNote] = useState('')
   const [writeFile, setWriteFile] = useState(true)
   const [urlMode, setUrlMode] = useState(false)
   const [url, setUrl] = useState('')
@@ -33,8 +38,10 @@ export function TagEditor(): React.JSX.Element | null {
     setAlbum(track.album)
     setCoverPath(track.coverPath)
     setCoverUrl(track.coverUrlAuto ? '' : (track.coverUrl ?? ''))
-    setPresetId(track.presetId ?? '')
+    setPresetId(track.presetId ?? (track.sound ? OWN : ''))
     setLyrics(track.lyrics ?? '')
+    setGenre(track.genre ?? '')
+    setNote(track.note ?? '')
     setUrlMode(false)
     setUrl('')
     // only reset when another track is opened
@@ -65,13 +72,16 @@ export function TagEditor(): React.JSX.Element | null {
       artist: artist.trim(),
       album: album.trim(),
       coverPath,
-      presetId: presetId || undefined,
+      ...(presetId === OWN ? {} : { presetId: presetId || undefined, sound: undefined }),
       lyrics: lyrics.trim() || undefined,
+      genre: genre.trim() || undefined,
+      note: note.trim() || undefined,
       ...(coverUrl.trim()
         ? { coverUrl: coverUrl.trim(), coverUrlAuto: false }
-        : track.coverUrlAuto
+        : track.coverUrlAuto && coverPath === track.coverPath
           ? {}
-          : { coverUrl: undefined, coverUrlAuto: undefined })
+          : // a found / uploaded link belonged to the old cover: Discord looks again
+            { coverUrl: undefined, coverUrlAuto: undefined })
     }
     // A new title/artist invalidates an automatically found Discord cover.
     if (!coverUrl.trim() && track.coverUrlAuto && (patch.title !== track.title || patch.artist !== track.artist)) {
@@ -86,7 +96,8 @@ export function TagEditor(): React.JSX.Element | null {
         album: patch.album,
         coverPath,
         clearCover: !coverPath,
-        lyrics: lyrics.trim() ? lyrics.trim() : undefined
+        lyrics: lyrics.trim() ? lyrics.trim() : undefined,
+        genre: genre.trim()
       })
       if (!res.ok) toast(t('tags.writeFailed', { error: res.error }), 'error')
       else toast(t('tags.saved'), 'success')
@@ -168,9 +179,16 @@ export function TagEditor(): React.JSX.Element | null {
           <Field label={t('tags.album')}>
             <input className="input" value={album} onChange={(e) => setAlbum(e.target.value)} />
           </Field>
+          <Field label={t('tags.genre')}>
+            <input className="input" value={genre} placeholder={t('tags.genrePlaceholder')} onChange={(e) => setGenre(e.target.value)} />
+          </Field>
+          <Field label={t('notes.label')}>
+            <textarea className="input input--area" rows={2} value={note} placeholder={t('notes.placeholder')} onChange={(e) => setNote(e.target.value)} />
+          </Field>
           <Field label={t('tags.preset')}>
             <select className="input" value={presetId} onChange={(e) => setPresetId(e.target.value)}>
               <option value="">{t('menu.presetNone')}</option>
+              {track.sound && <option value={OWN}>{ownSoundLabel(track.sound.rate, t)}</option>}
               {allPresets().map((p) => (
                 <option key={p.id} value={p.id}>
                   {presetLabel(p, t)}

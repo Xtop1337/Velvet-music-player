@@ -1,3 +1,4 @@
+import { formatRate } from './format'
 import type { TFunction } from 'i18next'
 import type { Track } from '@shared/types'
 
@@ -11,7 +12,8 @@ export function trackArtist(t: Track | undefined, tr: TFunction): string {
 
 export function matchesQuery(t: Track, q: string): boolean {
   if (!q) return true
-  const hay = `${t.title} ${t.artist} ${t.album}`.toLowerCase()
+  // notes and genres are searchable too
+  const hay = `${t.title} ${t.artist} ${t.album} ${t.genre ?? ''} ${t.note ?? ''}`.toLowerCase()
   return q
     .toLowerCase()
     .split(/\s+/)
@@ -25,6 +27,11 @@ export function totalDuration(tracks: Track[]): number {
 
 export function presetLabel(p: { id: string; name: string; builtIn?: boolean }, tr: TFunction): string {
   return p.builtIn ? tr(`presets.${p.id}`, { defaultValue: p.name }) : p.name
+}
+
+/** A track's own bound speed (not a preset), e.g. "Own: 0.85x". */
+export function ownSoundLabel(rate: number, tr: TFunction): string {
+  return tr('speed.ownSound', { rate: formatRate(rate) })
 }
 
 export const TRACK_DRAG_TYPE = 'application/x-velvet-tracks'

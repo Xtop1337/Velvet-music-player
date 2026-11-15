@@ -1,14 +1,18 @@
 import type { ReactNode } from 'react'
 import { create } from 'zustand'
+import type { SmartPlaylist } from '@shared/types'
 
 export type View =
   | { type: 'library' }
   | { type: 'playlist'; id: string }
   | { type: 'import' }
-  | { type: 'settings' }
+  | { type: 'settings'; section?: 'import' | 'discord' }
   | { type: 'liked' }
   | { type: 'stats' }
   | { type: 'search' }
+  | { type: 'recommend' }
+  | { type: 'mix'; id: string }
+  | { type: 'smart'; id: string }
   | { type: 'album'; album: string; artist: string }
   | { type: 'artist'; artist: string }
 
@@ -40,7 +44,10 @@ interface UiState {
   exportId: string | null
   toasts: Toast[]
   menu: { x: number; y: number; items: MenuItem[] } | null
-  prompt: { title: string; value: string; placeholder?: string; onSubmit: (v: string) => void } | null
+  prompt: { title: string; value: string; placeholder?: string; multiline?: boolean; onSubmit: (v: string) => void } | null
+  /** the smart playlist being created / edited */
+  smartEdit: SmartPlaylist | null
+  editSmart: (pl: SmartPlaylist | null) => void
   confirm: { title: string; text?: string; danger?: boolean; onConfirm: () => void } | null
   navigate: (view: View) => void
   setSearch: (s: string) => void
@@ -70,6 +77,7 @@ export const useUi = create<UiState>((set, get) => ({
   toasts: [],
   menu: null,
   prompt: null,
+  smartEdit: null,
   confirm: null,
   navigate: (view) => set({ view, nowPlayingOpen: false, speedOpen: null }),
   setSearch: (search) => set({ search }),
@@ -87,5 +95,6 @@ export const useUi = create<UiState>((set, get) => ({
   openMenu: (x, y, items) => set({ menu: { x, y, items } }),
   closeMenu: () => set({ menu: null }),
   askText: (prompt) => set({ prompt }),
+  editSmart: (smartEdit) => set({ smartEdit }),
   askConfirm: (confirm) => set({ confirm })
 }))

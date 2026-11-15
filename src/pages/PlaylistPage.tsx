@@ -1,7 +1,9 @@
 import { ImagePlus, ListMusic, MoreHorizontal, Pencil, Play, Shuffle, Trash2 } from 'lucide-react'
 import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
-import { TrackList } from '@renderer/components/TrackList'
+import { LayoutToggle, useLayout } from '@renderer/components/LayoutToggle'
+import { NoteBlock } from '@renderer/components/NoteBlock'
+import { TrackView } from '@renderer/components/TrackGrid'
 import { Button, Cover, IconButton } from '@renderer/components/ui'
 import { formatTime } from '@renderer/lib/format'
 import { matchesQuery, totalDuration } from '@renderer/lib/tracks'
@@ -15,6 +17,7 @@ export function PlaylistPage({ id }: { id: string }): React.JSX.Element {
   const tracks = useLibrary((s) => s.tracks)
   const search = useUi((s) => s.search)
   const ui = useUi.getState()
+  const [layout, setLayout] = useLayout('playlist')
 
   const ids = useMemo(() => (playlist?.trackIds ?? []).filter((tid) => tracks[tid]), [playlist, tracks])
   const shown = useMemo(() => (search ? ids.filter((tid) => matchesQuery(tracks[tid], search)) : ids), [ids, tracks, search])
@@ -70,6 +73,7 @@ export function PlaylistPage({ id }: { id: string }): React.JSX.Element {
           <p>
             {t('common.tracks', { count: ids.length })} · {formatTime(totalDuration(ids.map((tid) => tracks[tid])))}
           </p>
+          <NoteBlock note={playlist.note} title={t('notes.playlistTitle', { name: playlist.name })} onSave={(v) => useLibrary.getState().setPlaylistNote(id, v)} />
           <div className="playlist-hero__actions no-drag">
             <Button variant="primary" icon={<Play size={16} fill="currentColor" />} disabled={!ids.length} onClick={() => void usePlayer.getState().playQueue(ids, 0)}>
               {t('library.playAll')}
@@ -106,6 +110,8 @@ export function PlaylistPage({ id }: { id: string }): React.JSX.Element {
             >
               <MoreHorizontal size={20} />
             </IconButton>
+            <div className="toolbar__spacer" />
+            <LayoutToggle value={layout} onChange={setLayout} />
           </div>
         </div>
       </header>
@@ -115,7 +121,7 @@ export function PlaylistPage({ id }: { id: string }): React.JSX.Element {
           <p>{t('playlist.emptyText')}</p>
         </div>
       ) : (
-        <TrackList ids={shown} playlistId={search ? undefined : id} />
+        <TrackView ids={shown} layout={layout} playlistId={search ? undefined : id} />
       )}
     </div>
   )

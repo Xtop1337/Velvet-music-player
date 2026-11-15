@@ -9,6 +9,7 @@ import { getCurrentWebview } from '@tauri-apps/api/webview'
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow'
 import { mainStrings } from '@shared/mainStrings'
 import type {
+  AnalysisResult,
   AppPrefs,
   DiscordStatus,
   ExportOptions,
@@ -19,11 +20,16 @@ import type {
   LyricsResult,
   NowPlayingPayload,
   PlayerCommand,
+  FastRecommendRequest,
+  RadioRequest,
+  RecommendRequest,
   RemoteState,
   SearchResult,
   SearchSource,
+  SpotifyKeys,
   Track,
   UpdateStatus,
+  WaveRequest,
   YtDlpStatus
 } from '@shared/types'
 
@@ -72,6 +78,7 @@ function tracked<T>(p: Promise<T>): Promise<T> {
 const api = {
   app: {
     info: (): Promise<{ platform: string; version: string; defaultDownloads: string }> => invoke('app_info'),
+    log: (level: 'info' | 'warn' | 'error', message: string): Promise<void> => invoke('ui_log', { level, message }),
     setWindowTheme: (colors: { bg: string; fg: string }): Promise<void> => invoke('window_theme', { bg: colors.bg }),
     openExternal: (url: string): Promise<void> => invoke('open_external', { url })
   },
@@ -104,7 +111,7 @@ const api = {
     }
   },
   tags: {
-    write: (t: { path: string; title: string; artist: string; album: string; coverPath?: string; clearCover?: boolean; lyrics?: string }): Promise<{ ok: boolean; error?: string }> =>
+    write: (t: { path: string; title: string; artist: string; album: string; coverPath?: string; clearCover?: boolean; lyrics?: string; genre?: string }): Promise<{ ok: boolean; error?: string }> =>
       invoke('tags_write', { t })
   },
   covers: {
@@ -117,8 +124,8 @@ const api = {
     pickVideo: (): Promise<string | null> => invoke('dialog_pick_video')
   },
   discord: {
-    configure: (opts: { enabled: boolean; clientId: string; showSpeed: boolean; showButtons: boolean; lookupCovers: boolean; hideWhenPaused?: boolean }): Promise<void> =>
-      invoke('discord_configure', { opts: { hideWhenPaused: false, ...opts } }),
+    configure: (opts: { enabled: boolean; clientId: string; showSpeed: boolean; showButtons: boolean; lookupCovers: boolean; uploadCovers?: boolean; hideWhenPaused?: boolean }): Promise<void> =>
+      invoke('discord_configure', { opts: { hideWhenPaused: false, uploadCovers: true, ...opts } }),
     update: (p: NowPlayingPayload | null): Promise<void> => invoke('discord_update', { p: p && { ...p, strings: mainStrings(p.language) } }),
     status: (): Promise<DiscordStatus> => invoke('discord_status'),
     onStatus: (cb: (status: DiscordStatus, user?: string) => void): Unsubscribe => on('discord:status', cb),
@@ -129,8 +136,25 @@ const api = {
     onProgress: (cb: (p: ExportProgress) => void): Unsubscribe => on('export:progress', cb)
   },
   search: {
-    query: (q: string, source: SearchSource): Promise<{ results: SearchResult[]; error?: string }> => invoke('search_query', { q, source }),
-    preview: (url: string): Promise<string> => invoke('search_preview', { url })
+    query: (q: string, source: SearchSource, spotify?: SpotifyKeys | null): Promise<{ results: SearchResult[]; error?: string }> =>
+      invoke('search_query', { q, source, spotify: spotify ?? null }),
+    preview: (r: { url: string; title: string; artist: string; duration: number }): Promise<string> => invoke('search_preview', { r }),
+    recommend: (req: RecommendRequest): Promise<{ results: SearchResult[]; error?: string }> => invoke('recommend', { req }),
+    recommendFast: (req: FastRecommendRequest): Promise<{ results: SearchResult[]; error?: string }> => invoke('recommend_fast', { req }),
+    radio: (req: RadioRequest): Promise<{ results: SearchResult[]; error?: string }> => invoke('radio_tracks', { req }),
+    /** songs the service lists next to the user's own songs */
+    waveCandidates: (req: WaveRequest): Promise<{ results: SearchResult[]; error?: string }> => invoke('wave_candidates', { req })
+  },
+  stream: {
+    /** A playable stream id for a song from the internet (see stream.rs). */
+    resolve: (r: { title: string; artist: string; duration: number; page?: string; prefer?: string; fresh?: boolean }): Promise<{ id: string; page: string }> =>
+      invoke('stream_resolve', { r }),
+    /** Downloads the stream into a temporary file ahead of playback; true when it is ready. */
+    prefetch: (id: string): Promise<boolean> => invoke('stream_prefetch', { id })
+  },
+  meta: {
+    lookup: (items: { id: string; artist?: string; title?: string; page?: string }[]): Promise<void> => invoke('meta_lookup', { items }),
+    onResult: (cb: (r: { id: string; genre?: string | null; year?: number | null; fromPage?: boolean }) => void): Unsubscribe => on('meta:result', cb)
   },
   remote: {
     pushState: (s: RemoteState): void => void invoke('player_state', { s }).catch(() => {}),
@@ -156,6 +180,12 @@ const api = {
   },
   lyrics: {
     get: (q: LyricsQuery): Promise<LyricsResult> => invoke('lyrics_get', { q })
+  },
+  analysis: {
+    start: (items: { id: string; path: string }[]): Promise<void> => invoke('analysis_start', { items }),
+    cancel: (): Promise<void> => invoke('analysis_cancel'),
+    onResult: (cb: (r: AnalysisResult) => void): Unsubscribe => on('analysis:result', cb),
+    onProgress: (cb: (p: { done: number; total: number }) => void): Unsubscribe => on('analysis:progress', cb)
   },
   importer: {
     start: (opts: ImportOptions): Promise<string> => invoke('import_start', { opts }),

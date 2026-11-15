@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import { DEFAULT_SETTINGS, mergeSettings } from '@shared/defaults'
 import type { Settings } from '@shared/types'
 
-type Section = 'discord' | 'importer' | 'playback' | 'exporter' | 'desktop' | 'updates' | 'hotkeys'
+type Section = 'discord' | 'importer' | 'playback' | 'exporter' | 'desktop' | 'updates' | 'hotkeys' | 'analysis'
 
 interface SettingsState {
   settings: Settings

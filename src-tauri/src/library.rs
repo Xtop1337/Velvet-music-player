@@ -72,6 +72,51 @@ fn artists_of(tag: &Tag) -> Option<String> {
     None
 }
 
+/// Year, genre, tempo and key from the tags.
+#[derive(Debug, Default, Clone, PartialEq)]
+pub struct TagMeta {
+    pub year: Option<u32>,
+    pub genre: Option<String>,
+    pub bpm: Option<f64>,
+    pub key: Option<String>,
+    pub camelot: Option<String>,
+}
+
+fn tag_meta(tags: &[&Tag]) -> TagMeta {
+    let year = tags
+        .iter()
+        .find_map(|t| {
+            t.date()
+                .map(|d| d.year as u32)
+                .or_else(|| t.get_string(ItemKey::Year).and_then(|y| y.get(..4)?.parse().ok()))
+        })
+        .filter(|y| *y > 0);
+    let genre = first_text(tags, |t| t.genre().map(|s| s.into_owned()))
+        // ID3v1-style "(17)" numbers and lists separated by NUL / ';'
+        .map(|g| g.split(['\0', ';']).next().unwrap_or("").trim().to_string())
+        .filter(|g| !g.is_empty() && !g.starts_with('('));
+    let bpm = tags
+        .iter()
+        .find_map(|t| t.get_string(ItemKey::Bpm).or_else(|| t.get_string(ItemKey::IntegerBpm)))
+        .and_then(|b| b.trim().replace(',', ".").parse::<f64>().ok())
+        .filter(|b| (30.0..=300.0).contains(b));
+    let key = tags.iter().find_map(|t| t.get_string(ItemKey::InitialKey)).and_then(crate::analysis::parse_key);
+    TagMeta {
+        year,
+        genre,
+        bpm,
+        key: key.as_ref().map(|k| k.0.clone()),
+        camelot: key.map(|k| k.1),
+    }
+}
+
+/// Only the tag metadata of a file (no cover extraction).
+pub fn read_meta(file: &str) -> TagMeta {
+    let Ok(tagged) = lofty::read_from_path(file) else { return TagMeta::default() };
+    let tags: Vec<&Tag> = tagged.tags().iter().collect();
+    tag_meta(&tags)
+}
+
 pub fn read_track(file: &str, source: &str) -> Track {
     let (artist, title) = guess_from_file_name(file);
     let mut track = Track {
@@ -107,14 +152,12 @@ pub fn read_track(file: &str, source: &str) -> Track {
         track.album = v;
     }
     track.track_no = tags.iter().find_map(|t| t.track()).filter(|n| *n > 0);
-    track.year = tags
-        .iter()
-        .find_map(|t| {
-            t.date()
-                .map(|d| d.year as u32)
-                .or_else(|| t.get_string(ItemKey::Year).and_then(|y| y.get(..4)?.parse().ok()))
-        })
-        .filter(|y| *y > 0);
+    let meta = tag_meta(&tags);
+    track.year = meta.year;
+    track.genre = meta.genre;
+    track.bpm = meta.bpm;
+    track.key = meta.key;
+    track.camelot = meta.camelot;
     let pic = tags
         .iter()
         .find_map(|t| t.get_picture_type(PictureType::CoverFront))

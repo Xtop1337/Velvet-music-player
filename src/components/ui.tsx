@@ -146,23 +146,28 @@ export function Segmented<T extends string>(props: {
   )
 }
 
-export function Cover(props: { path?: string; seed: string; size?: number; className?: string; rounded?: number }): React.JSX.Element {
+/** A cover image: a cached file (`path`) or, for tracks from the internet, a public `url`. */
+export function Cover(props: { path?: string; url?: string; seed: string; size?: number; className?: string; rounded?: number }): React.JSX.Element {
   const [failed, setFailed] = useState(false)
-  useEffect(() => setFailed(false), [props.path])
+  const remote = !props.path && props.url && /^https:\/\//.test(props.url) ? props.url : undefined
+  useEffect(() => setFailed(false), [props.path, remote])
   const style: CSSProperties = {
     width: props.size,
     height: props.size,
     borderRadius: props.rounded
   }
-  if (props.path && !failed) {
+  if ((props.path || remote) && !failed) {
     return (
       <img
         className={`cover ${props.className ?? ''}`}
         style={style}
-        src={mediaUrl(props.path)}
+        src={props.path ? mediaUrl(props.path) : remote}
         alt=""
         draggable={false}
-        crossOrigin="anonymous"
+        loading="lazy"
+        // local covers feed the colour extraction (canvas); remote ones may not allow CORS
+        crossOrigin={props.path ? 'anonymous' : undefined}
+        referrerPolicy="no-referrer"
         onError={() => setFailed(true)}
       />
     )

@@ -1,6 +1,10 @@
 import {
   AudioLines,
   ChevronUp,
+  Download,
+  Loader2,
+  Radio,
+  ThumbsDown,
   ListMusic,
   PictureInPicture2,
   Pause,
@@ -21,10 +25,13 @@ import { VOLUME_MAX } from '@shared/defaults'
 import { engine } from '@renderer/audio/engine'
 import { formatRate, formatTime } from '@renderer/lib/format'
 import { presetLabel, trackArtist, trackTitle } from '@renderer/lib/tracks'
+import { downloadStreamTrack } from '@renderer/store/imports'
 import { useLibrary } from '@renderer/store/library'
 import { allPresets, usePlayer } from '@renderer/store/player'
+import { useRadio } from '@renderer/store/radio'
 import { useUi } from '@renderer/store/ui'
 import { LikeButton } from './LikeButton'
+import { RateButtons } from './RateButtons'
 import { SpeedPanel } from './SpeedPanel'
 import { Cover, IconButton, Slider } from './ui'
 
@@ -228,6 +235,8 @@ export function PlayerBar(): React.JSX.Element {
   const queueOpen = useUi((s) => s.queueOpen)
   const setQueue = useUi((s) => s.setQueue)
   const setNowPlaying = useUi((s) => s.setNowPlaying)
+  const resolving = usePlayer((s) => s.resolving)
+  const radio = useRadio((s) => s.active)
 
   return (
     <footer className="player">
@@ -235,15 +244,48 @@ export function PlayerBar(): React.JSX.Element {
         {track ? (
           <>
             <div className="player__cover">
-              <Cover path={track.coverPath} seed={track.id} size={58} rounded={12} />
+              <Cover path={track.coverPath} url={track.coverUrl} seed={track.id} size={58} rounded={12} />
+              {resolving && (
+                <span className="player__resolving" title={t('stream.connecting')}>
+                  <Loader2 size={20} className="spin" />
+                </span>
+              )}
             </div>
             <div className="player__meta">
               <span className="player__title" title={trackTitle(track, t)}>
                 {trackTitle(track, t)}
               </span>
-              <span className="player__artist">{trackArtist(track, t)}</span>
+              <span className="player__artist">
+                {radio && (
+                  <span className="radio-badge" title={radio.label}>
+                    <Radio size={12} /> {radio.kind === 'wave' ? t('radio.wave') : t('radio.badge')}
+                  </span>
+                )}
+                {trackArtist(track, t)}
+              </span>
             </div>
-            <LikeButton trackId={track.id} />
+            {track.stream ? (
+              <>
+                {/* a song from the internet: 👍 / 👎 teach the recommendations, "download" keeps it */}
+                <RateButtons
+                  song={{ artist: track.artist, title: track.title, genre: track.genre, url: track.stream.page ?? track.stream.link }}
+                  size={17}
+                  onDisliked={() => void usePlayer.getState().next()}
+                />
+                <IconButton label={t('stream.download')} size="sm" onClick={() => void downloadStreamTrack(track)}>
+                  <Download size={17} />
+                </IconButton>
+              </>
+            ) : (
+              <>
+                <LikeButton trackId={track.id} />
+                {radio && (
+                  <IconButton label={t('taste.notInterested')} size="sm" onClick={() => useRadio.getState().dislikeCurrent()}>
+                    <ThumbsDown size={16} />
+                  </IconButton>
+                )}
+              </>
+            )}
           </>
         ) : (
           <div className="player__meta player__meta--empty">

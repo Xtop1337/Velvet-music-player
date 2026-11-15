@@ -1,7 +1,7 @@
 {
   "name": "velvet-player",
   "productName": "Velvet",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "description": "Velvet — музыкальный плеер со slowed/nightcore пресетами, Discord-активностью и импортом из SoundCloud/Spotify",
   "author": "Velvet",
   "license": "MIT",

@@ -1,95 +1,97 @@
-import { Check, Cloud, Download, Loader2, Pause, Play, Search, Youtube } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { KeyRound, Loader2, Search } from 'lucide-react'
+import { useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { SearchResult, SearchSource } from '@shared/types'
+import { LayoutToggle, useLayout } from '@renderer/components/LayoutToggle'
+import { OnlineResults } from '@renderer/components/OnlineResults'
+import { SOURCE_NAMES } from '@renderer/components/ServiceIcons'
+import { rememberSource, rememberedSource, SourcePicker } from '@renderer/components/SourcePicker'
 import { TrackList } from '@renderer/components/TrackList'
-import { Segmented } from '@renderer/components/ui'
-import { engine } from '@renderer/audio/engine'
-import { formatTime, placeholderGradient } from '@renderer/lib/format'
+import { Button } from '@renderer/components/ui'
 import { matchesQuery } from '@renderer/lib/tracks'
-import { useImports } from '@renderer/store/imports'
 import { useLibrary } from '@renderer/store/library'
-import { usePlayer } from '@renderer/store/player'
+import { streamTrack, useRadio } from '@renderer/store/radio'
+import { useSettings } from '@renderer/store/settings'
 import { useUi } from '@renderer/store/ui'
 
-const preview = new Audio()
-preview.preload = 'none'
+const SOURCE_KEY = 'velvet.searchSource'
 
-function remembered(): SearchSource {
-  try {
-    return localStorage.getItem('velvet.searchSource') === 'youtube' ? 'youtube' : 'soundcloud'
-  } catch {
-    return 'soundcloud'
-  }
+/** The user's own Spotify keys from Settings → Import, if both are filled in. */
+export function useSpotifyKeys(): { clientId: string; clientSecret: string } | null {
+  const id = useSettings((s) => s.settings.importer.spotifyClientId)
+  const secret = useSettings((s) => s.settings.importer.spotifyClientSecret)
+  return useMemo(() => (id.trim() && secret.trim() ? { clientId: id.trim(), clientSecret: secret.trim() } : null), [id, secret])
+}
+
+/** Spotify needs the user's keys: what to do instead of results without them. */
+export function SpotifyKeysHint({ reason }: { reason?: string }): React.JSX.Element {
+  const { t } = useTranslation()
+  const navigate = useUi((s) => s.navigate)
+  return (
+    <div className="keys-hint card">
+      <KeyRound size={22} />
+      <div>
+        <strong>{reason === 'spotify-auth' ? t('search.spotify.badKeys') : t('search.spotify.needKeys')}</strong>
+        <p className="muted small">{t('search.spotify.howTo')}</p>
+      </div>
+      <Button variant="primary" onClick={() => navigate({ type: 'settings', section: 'import' })}>
+        {reason === 'spotify-auth' ? t('search.spotify.fixKeys') : t('search.spotify.addKeys')}
+      </Button>
+    </div>
+  )
+}
+
+/** Text for a search / recommendation error (Spotify's are explained). */
+export function onlineError(error: string, t: (k: string, o?: Record<string, unknown>) => string): string {
+  if (error === 'spotify-forbidden') return t('search.spotify.forbidden')
+  if (error === 'spotify-rate-limit') return t('search.spotify.rateLimit')
+  // no connection (or a blocked one): say so instead of the tool's own message
+  if (/deezer-unavailable|unable to connect|proxy|timed? ?out|connection (refused|reset|failed)|name or service|getaddrinfo|network is unreachable|error sending request|dns/i.test(error))
+    return t('search.offline')
+  return t('search.error', { error: error.slice(0, 200) })
 }
 
 export function SearchPage(): React.JSX.Element {
   const { t } = useTranslation()
   const [query, setQuery] = useState('')
-  const [source, setSource] = useState<SearchSource>(remembered)
+  const [source, setSource] = useState<SearchSource>(() => rememberedSource(SOURCE_KEY))
   const [results, setResults] = useState<SearchResult[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [searched, setSearched] = useState('')
-  const [previewing, setPreviewing] = useState<string | null>(null)
-  const [previewLoading, setPreviewLoading] = useState<string | null>(null)
-  const [started, setStarted] = useState<Record<string, string>>({})
-  const jobs = useImports((s) => s.jobs)
   const order = useLibrary((s) => s.order)
   const tracks = useLibrary((s) => s.tracks)
-  const toast = useUi((s) => s.toast)
+  const keys = useSpotifyKeys()
   const seq = useRef(0)
+  const [layout, setLayout] = useLayout('search')
 
   const local = useMemo(() => (searched ? order.filter((id) => tracks[id] && matchesQuery(tracks[id], searched)).slice(0, 5) : []), [searched, order, tracks])
-
-  useEffect(() => {
-    const stop = (): void => setPreviewing(null)
-    preview.addEventListener('ended', stop)
-    preview.addEventListener('pause', stop)
-    return () => {
-      preview.removeEventListener('ended', stop)
-      preview.removeEventListener('pause', stop)
-      preview.pause()
-    }
-  }, [])
+  const needsKeys = source === 'spotify' && (!keys || error === 'spotify-keys' || error === 'spotify-auth')
 
   const run = async (q = query, src = source): Promise<void> => {
     const text = q.trim()
     if (!text) return
     const id = ++seq.current
-    setLoading(true)
-    setError('')
     setSearched(text)
-    const res = await window.velvet.search.query(text, src)
+    setError('')
+    if (src === 'spotify' && !keys) {
+      setResults([])
+      setLoading(false)
+      return
+    }
+    setLoading(true)
+    const res = await window.velvet.search.query(text, src, src === 'spotify' ? keys : null).catch((e: unknown) => ({ results: [], error: String(e) }))
     if (id !== seq.current) return
     setResults(res.results)
     setError(res.error ?? '')
     setLoading(false)
   }
 
-  const togglePreview = async (r: SearchResult): Promise<void> => {
-    if (previewing === r.id) {
-      preview.pause()
-      return
-    }
-    setPreviewLoading(r.id)
-    try {
-      const url = await window.velvet.search.preview(r.url)
-      if (!engine.paused) usePlayer.getState().pause()
-      preview.src = url
-      preview.volume = Math.min(1, usePlayer.getState().volume)
-      await preview.play()
-      setPreviewing(r.id)
-    } catch {
-      toast(t('search.previewFailed'), 'error')
-    } finally {
-      setPreviewLoading(null)
-    }
-  }
-
-  const download = async (r: SearchResult): Promise<void> => {
-    const jobId = await useImports.getState().start(r.url)
-    setStarted((s) => ({ ...s, [r.id]: jobId }))
+  const changeSource = (v: SearchSource): void => {
+    setSource(v)
+    rememberSource(SOURCE_KEY, v)
+    setResults([])
+    if (searched) void run(searched, v)
   }
 
   return (
@@ -111,23 +113,7 @@ export function SearchPage(): React.JSX.Element {
           <Search size={20} />
         </span>
         <input className="import-box__input" autoFocus value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t('search.placeholder')} />
-        <Segmented<SearchSource>
-          label={t('search.source')}
-          value={source}
-          onChange={(v) => {
-            setSource(v)
-            try {
-              localStorage.setItem('velvet.searchSource', v)
-            } catch {
-              // convenience only
-            }
-            if (searched) void run(searched, v)
-          }}
-          options={[
-            { value: 'soundcloud', label: <span className="seg-icon"><Cloud size={15} /> SoundCloud</span> },
-            { value: 'youtube', label: <span className="seg-icon"><Youtube size={15} /> YouTube</span> }
-          ]}
-        />
+        <SourcePicker value={source} onChange={changeSource} notes={keys ? undefined : { spotify: t('search.spotify.keysNote') }} />
         <button type="submit" className="btn btn--primary" disabled={!query.trim() || loading}>
           {loading ? <Loader2 size={16} className="spin" /> : <Search size={16} />}
           <span>{t('search.go')}</span>
@@ -141,58 +127,25 @@ export function SearchPage(): React.JSX.Element {
         </>
       )}
 
-      {searched && <h3 className="section-title">{t('search.online', { source: source === 'soundcloud' ? 'SoundCloud' : 'YouTube' })}</h3>}
-      {error && <p className="text-danger small">{t('search.error', { error: error.slice(0, 200) })}</p>}
-      {loading && (
-        <div className="search-results">
-          {Array.from({ length: 6 }, (_, i) => (
-            <div key={i} className="search-row is-skeleton">
-              <div className="search-row__art" />
-              <div className="search-row__text">
-                <i />
-                <i />
-              </div>
-            </div>
-          ))}
+      {needsKeys && <SpotifyKeysHint reason={error} />}
+      {!needsKeys && searched && (
+        <div className="recommend-bar">
+          <h3 className="section-title">{t('search.online', { source: SOURCE_NAMES[source] })}</h3>
+          <div className="toolbar__spacer" />
+          <LayoutToggle value={layout} onChange={setLayout} />
         </div>
       )}
-      {!loading && searched && !error && results.length === 0 && <p className="muted">{t('search.nothing')}</p>}
-      {!loading && results.length > 0 && (
-        <div className="search-results">
-          {results.map((r) => {
-            const job = started[r.id] ? jobs.find((j) => j.jobId === started[r.id]) : undefined
-            const active = job && (job.state === 'resolving' || job.state === 'downloading')
-            return (
-              <div key={r.id} className={`search-row ${previewing === r.id ? 'is-previewing' : ''}`}>
-                <button type="button" className="search-row__art" onClick={() => void togglePreview(r)} aria-label={t('search.preview')} title={t('search.preview')}>
-                  {r.thumbnail ? <img src={r.thumbnail} alt="" /> : <span style={{ background: placeholderGradient(r.id) }} />}
-                  <span className="search-row__play">
-                    {previewLoading === r.id ? <Loader2 size={18} className="spin" /> : previewing === r.id ? <Pause size={18} fill="currentColor" /> : <Play size={18} fill="currentColor" />}
-                  </span>
-                </button>
-                <div className="search-row__text">
-                  <strong>{r.title}</strong>
-                  <span>{r.artist}</span>
-                </div>
-                <span className="search-row__time">{r.duration ? formatTime(r.duration) : ''}</span>
-                <button type="button" className={`btn ${job?.state === 'done' ? 'btn--ghost' : 'btn--secondary'}`} disabled={!!active || job?.state === 'done'} onClick={() => void download(r)}>
-                  {job?.state === 'done' ? <Check size={16} /> : active ? <Loader2 size={16} className="spin" /> : <Download size={16} />}
-                  <span>
-                    {job?.state === 'done'
-                      ? t('search.added')
-                      : active
-                        ? `${Math.round(job!.percent * 100)}%`
-                        : job?.state === 'error'
-                          ? t('search.retry')
-                          : t('search.download')}
-                  </span>
-                </button>
-              </div>
-            )
-          })}
-        </div>
+      {!needsKeys && error && <p className="text-danger small">{onlineError(error, t)}</p>}
+      {!needsKeys && (
+        <OnlineResults
+          results={results}
+          loading={loading}
+          layout={layout}
+          onRadio={(r) => void useRadio.getState().start(streamTrack({ ...r, source: r.source }, source === 'soundcloud' ? 'soundcloud' : 'youtube'))}
+        />
       )}
-      {!searched && <p className="muted small">{t('search.hint')}</p>}
+      {!needsKeys && !loading && searched && !error && results.length === 0 && <p className="muted">{t('search.nothing')}</p>}
+      {!searched && !needsKeys && <p className="muted small">{t('search.hint')}</p>}
     </div>
   )
 }

@@ -67,7 +67,16 @@ pub fn is_disk_path(p: &str) -> bool {
 /// The whole protocol: files from the disk (media only), otherwise the app's own assets
 /// (index.html, scripts, styles, fonts) with the CSP Tauri computed for them.
 pub fn serve<R: Runtime>(app: &AppHandle<R>, req: &Request<Vec<u8>>) -> Response<Vec<u8>> {
-    if req.method() == Method::OPTIONS || is_disk_path(&path_from_uri(req.uri().path())) {
+    let decoded = path_from_uri(req.uri().path());
+    if let Some(id) = decoded.strip_prefix("__stream/") {
+        // a track from the internet (see stream.rs), when the loopback server can't be used
+        if req.method() == Method::OPTIONS {
+            return handle(req);
+        }
+        let range = req.headers().get(header::RANGE).and_then(|v| v.to_str().ok());
+        return crate::stream::protocol_response(id, req.method().as_str(), range);
+    }
+    if req.method() == Method::OPTIONS || is_disk_path(&decoded) {
         return handle(req);
     }
     match app.asset_resolver().get(req.uri().path().to_string()) {

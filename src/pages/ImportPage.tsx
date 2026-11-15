@@ -3,19 +3,11 @@ import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { parseMusicLink } from '@shared/links'
 import type { ImportProgress } from '@shared/types'
+import { SpotifyLogo } from '@renderer/components/ServiceIcons'
 import { Button } from '@renderer/components/ui'
 import { useImports } from '@renderer/store/imports'
 import { useLibrary } from '@renderer/store/library'
 import { useUi } from '@renderer/store/ui'
-
-function SpotifyLogo({ size = 18 }: { size?: number }): React.JSX.Element {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden>
-      <circle cx="12" cy="12" r="12" fill="#1DB954" />
-      <path d="M6.3 9.2c3.9-1.1 8.2-.8 11.6 1.1M7 12.6c3.2-.9 6.6-.6 9.4 1M7.7 15.8c2.5-.7 5.1-.5 7.3.8" stroke="#fff" strokeWidth="1.8" fill="none" strokeLinecap="round" />
-    </svg>
-  )
-}
 
 function JobCard({ job }: { job: ImportProgress }): React.JSX.Element {
   const { t } = useTranslation()

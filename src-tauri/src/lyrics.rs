@@ -103,10 +103,24 @@ fn has(s: &Option<String>) -> bool {
 }
 
 /// Picks the best LRCLIB search hit, or none when nothing is close enough.
+#[cfg(test)]
 pub fn pick_lrclib(rows: &[LrclibRow], duration: f64, want: Option<&Q>) -> Option<LrclibRow> {
+    pick_lrclib_for(rows, duration, want, false)
+}
+
+/// A slowed / sped-up / nightcore version: the same song at another tempo, so its length says
+/// nothing about which lyrics are right (the original's are, stretched).
+pub fn is_speed_version(title: &str) -> bool {
+    static RE: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"(?i)slowed|sped[\s_-]*up|speed[\s_-]*up|nightcore|daycore|замедл|ускор").unwrap()
+    });
+    RE.is_match(title)
+}
+
+pub fn pick_lrclib_for(rows: &[LrclibRow], duration: f64, want: Option<&Q>, speed_version: bool) -> Option<LrclibRow> {
     let score = |r: &LrclibRow| -> f64 {
         let mut s = if has(&r.synced_lyrics) { 10.0 } else { 0.0 };
-        if duration > 0.0 {
+        if duration > 0.0 && !speed_version {
             if let Some(d) = r.duration.filter(|d| *d > 0.0) {
                 let diff = (d - duration).abs();
                 s -= diff.min(20.0);
@@ -161,6 +175,7 @@ fn to_result(r: Option<LrclibRow>) -> LyricsResult {
         synced: r.synced_lyrics.filter(|s| !s.is_empty()),
         plain: r.plain_lyrics.filter(|s| !s.is_empty()),
         source: "lrclib".into(),
+        duration: r.duration.filter(|d| *d > 0.0),
         ..Default::default()
     }
 }
@@ -213,13 +228,15 @@ fn rows(v: Option<serde_json::Value>) -> Vec<LrclibRow> {
 
 async fn from_lrclib(q: &LyricsQuery) -> Result<LyricsResult, String> {
     let queries = lyric_queries(&q.title, &q.artist);
+    let speed = is_speed_version(&q.title) || is_speed_version(&q.album);
     // 1. exact signature lookups (fast, precise)
     for (i, v) in queries.iter().enumerate() {
         let mut params = vec![("track_name", v.title.clone()), ("artist_name", v.artist.clone())];
-        if i == 0 && !q.album.is_empty() {
+        if i == 0 && !q.album.is_empty() && !speed {
             params.push(("album_name", q.album.clone()));
         }
-        if q.duration > 0.0 {
+        // (a slowed / sped-up file is not as long as the song the lyrics were timed for)
+        if q.duration > 0.0 && !speed {
             params.push(("duration", (q.duration.round() as i64).to_string()));
         }
         let row = get("/get", &params)
@@ -233,7 +250,7 @@ async fn from_lrclib(q: &LyricsQuery) -> Result<LyricsResult, String> {
     // 2. fuzzy search, by fields and then by free text
     for v in queries.iter().skip(queries.len().saturating_sub(2)) {
         let found = rows(get("/search", &[("track_name", v.title.clone()), ("artist_name", v.artist.clone())]).await?);
-        if let Some(hit) = pick_lrclib(&found, q.duration, Some(v)) {
+        if let Some(hit) = pick_lrclib_for(&found, q.duration, Some(v), speed) {
             return Ok(to_result(Some(hit)));
         }
     }
@@ -241,7 +258,7 @@ async fn from_lrclib(q: &LyricsQuery) -> Result<LyricsResult, String> {
         return Ok(LyricsResult::none());
     };
     let free = rows(get("/search", &[("q", format!("{} {}", last.artist, last.title).trim().to_string())]).await?);
-    Ok(to_result(pick_lrclib(&free, q.duration, Some(last))))
+    Ok(to_result(pick_lrclib_for(&free, q.duration, Some(last), speed)))
 }
 
 fn cache_file(track_id: &str) -> std::path::PathBuf {
@@ -354,5 +371,26 @@ mod tests {
         };
         assert!(pick_lrclib(&[other], 120.0, Some(&q("Drive", "Neon"))).is_none());
         assert!(pick_lrclib(&[LrclibRow::default()], 100.0, None).is_none());
+    }
+
+    #[test]
+    fn slowed_versions_take_the_originals_lyrics() {
+        assert!(is_speed_version("Snowfall (Slowed + Reverb)"));
+        assert!(is_speed_version("METAMORPHOSIS - sped up"));
+        assert!(is_speed_version("Песня (замедленная)"));
+        assert!(!is_speed_version("Slow Dancing in the Dark"));
+        let rows = vec![LrclibRow {
+            track_name: Some("Snowfall".into()),
+            artist_name: Some("Øneheart".into()),
+            plain_lyrics: None,
+            synced_lyrics: Some("[00:01.00]la".into()),
+            instrumental: None,
+            duration: Some(100.0),
+        }];
+        let want = q("Snowfall", "Øneheart");
+        // the file is 140 s long (slowed): by length alone the original would be thrown out
+        assert!(pick_lrclib_for(&rows, 140.0, Some(&want), false).is_none());
+        let hit = pick_lrclib_for(&rows, 140.0, Some(&want), true).unwrap();
+        assert_eq!(to_result(Some(hit)).duration, Some(100.0));
     }
 }

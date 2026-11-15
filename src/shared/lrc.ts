@@ -1,7 +1,15 @@
+export interface LyricWord {
+  /** seconds */
+  time: number
+  text: string
+}
+
 export interface LyricLine {
   /** seconds, or null for plain (unsynced) lyrics */
   time: number | null
   text: string
+  /** word timestamps, when the lyrics have them (enhanced LRC: `<mm:ss.xx>word`) */
+  words?: LyricWord[]
 }
 
 export interface ParsedLyrics {
@@ -10,6 +18,27 @@ export interface ParsedLyrics {
 }
 
 const STAMP = /\[(\d{1,3}):(\d{1,2})(?:[.:](\d{1,3}))?\]/g
+const WORD_STAMP = /<(\d{1,3}):(\d{1,2})(?:[.:](\d{1,3}))?>/g
+
+function seconds(m: RegExpMatchArray): number {
+  const frac = m[3] ? Number(m[3]) / 10 ** m[3].length : 0
+  return Number(m[1]) * 60 + Number(m[2]) + frac
+}
+
+/** `<00:12.00>Word <00:12.50>by <00:13.10>word` → the words with their times, and the plain text. */
+function splitWords(body: string, offset: number): { text: string; words?: LyricWord[] } {
+  const stamps = [...body.matchAll(WORD_STAMP)]
+  if (!stamps.length) return { text: body }
+  const words: LyricWord[] = []
+  stamps.forEach((m, i) => {
+    const from = m.index! + m[0].length
+    const to = i + 1 < stamps.length ? stamps[i + 1].index! : body.length
+    const text = body.slice(from, to).trim()
+    if (text) words.push({ time: Math.max(0, seconds(m) - offset), text })
+  })
+  const text = body.replace(WORD_STAMP, ' ').replace(/\s+/g, ' ').trim()
+  return words.length >= 2 ? { text, words } : { text }
+}
 
 /** Parses LRC (`[mm:ss.xx] line`) or plain text. Supports several stamps per line and `[offset:±ms]`. */
 export function parseLrc(input: string): ParsedLyrics {
@@ -22,12 +51,12 @@ export function parseLrc(input: string): ParsedLyrics {
   const plain: LyricLine[] = []
   for (const raw of text.split('\n')) {
     const stamps = [...raw.matchAll(STAMP)]
-    const body = raw.replace(STAMP, '').trim()
+    const { text: body, words } = splitWords(raw.replace(STAMP, '').trim(), offset)
     if (stamps.length) {
       for (const m of stamps) {
-        const frac = m[3] ? Number(m[3]) / 10 ** m[3].length : 0
-        const time = Math.max(0, Number(m[1]) * 60 + Number(m[2]) + frac - offset)
-        timed.push({ time, text: body })
+        const time = Math.max(0, seconds(m) - offset)
+        // word times belong to the line's own stamp (a line repeated at several times has none)
+        timed.push(stamps.length === 1 && words ? { time, text: body, words } : { time, text: body })
       }
     } else if (!/^\[[a-z]+:.*\]$/i.test(raw.trim())) {
       plain.push({ time: null, text: raw.trim() })
@@ -83,9 +112,125 @@ export function estimateTimes(lines: LyricLine[], duration: number): LyricLine[]
   })
 }
 
-/** 0..1 progress through line `i` at `time` (for the karaoke fill). */
-export function lineProgress(lines: LyricLine[], i: number, time: number, duration: number): number {
+const CYRILLIC_VOWELS = /[аеёиоуыэюяіїєў]/gi
+const LATIN_VOWEL_GROUPS = /[aeiouyàáâãäåæèéêëìíîïòóôõöøùúûüýÿāēīōūœ]+/gi
+
+/** Roughly how many syllables a word is sung as (every word counts for at least one). */
+export function syllables(word: string): number {
+  const w = word.toLowerCase()
+  const cyr = w.match(CYRILLIC_VOWELS)?.length ?? 0
+  let lat = w.match(LATIN_VOWEL_GROUPS)?.length ?? 0
+  // a silent final "e" (make, time) is not sung
+  if (lat > 1 && /[^aeiouy]e$/.test(w.replace(/[^a-z]+$/, ''))) lat--
+  const digits = w.match(/\d/g)?.length ?? 0
+  return Math.max(1, cyr + lat + digits)
+}
+
+function lineSyllables(text: string): number {
+  return text
+    .split(/\s+/)
+    .filter((w) => /[\p{L}\p{N}]/u.test(w))
+    .reduce((n, w) => n + syllables(w), 0)
+}
+
+/**
+ * How fast this song is sung, in seconds per syllable: the median over the lines that are
+ * followed directly by the next line (no instrumental break in between).
+ */
+export function singingPace(lines: LyricLine[]): number {
+  const paces: number[] = []
+  for (let i = 0; i + 1 < lines.length; i++) {
+    const n = lineSyllables(lines[i].text)
+    const gap = (lines[i + 1].time ?? 0) - (lines[i].time ?? 0)
+    if (n >= 3 && gap > 0.4 && gap <= 9) paces.push(gap / n)
+  }
+  if (paces.length < 3) return 0.3
+  paces.sort((a, b) => a - b)
+  // the lower half: lines sung without a pause before the next one
+  const typical = paces[Math.floor(paces.length * 0.35)]
+  return Math.min(0.7, Math.max(0.1, typical))
+}
+
+/**
+ * How long line `i` is actually sung (seconds). The time to the next line is the upper bound;
+ * when that is much longer than the words need at the song's pace, the rest is a pause or an
+ * instrumental break, and the line ends early.
+ */
+export function sungLength(lines: LyricLine[], i: number, duration: number, pace: number): number {
   const start = lines[i]?.time ?? 0
+  const next = lines[i + 1]?.time ?? Math.max(start + 4, duration)
+  const gap = Math.max(0.3, next - start)
+  const need = lineSyllables(lines[i]?.text ?? '') * pace
+  if (need <= 0) return Math.min(gap, 4)
+  // singers stretch and rush: up to half as long again still counts as singing
+  return gap <= need * 1.5 + 0.4 ? gap : need * 1.15 + 0.2
+}
+
+export interface TimedWord {
+  text: string
+  start: number
+  end: number
+}
+
+/**
+ * When each word of line `i` is sung. Exact when the lyrics carry word times; otherwise the
+ * line's sung time is shared between its words by their syllables.
+ */
+export function wordTimings(lines: LyricLine[], i: number, duration: number, pace: number): TimedWord[] {
+  const line = lines[i]
+  if (!line) return []
+  const start = line.time ?? 0
+  const next = lines[i + 1]?.time ?? Math.max(start + 4, duration)
+  if (line.words?.length) {
+    return line.words.map((w, k) => {
+      const end = line.words![k + 1]?.time ?? Math.min(next, w.time + Math.max(0.25, syllables(w.text) * pace * 1.3))
+      return { text: w.text, start: w.time, end: Math.max(w.time + 0.05, end) }
+    })
+  }
+  const words = line.text.split(/\s+/).filter(Boolean)
+  if (!words.length) return []
+  const len = sungLength(lines, i, duration, pace)
+  const weights = words.map((w) => (/[\p{L}\p{N}]/u.test(w) ? syllables(w) : 0.3))
+  const total = weights.reduce((a, b) => a + b, 0) || 1
+  let t = start
+  return words.map((text, k) => {
+    const d = (len * weights[k]) / total
+    const word = { text, start: t, end: t + d }
+    t += d
+    return word
+  })
+}
+
+/** Stretches timestamps by `k` (a slowed / sped-up file of a song timed at its original speed). */
+export function scaleLines(lines: LyricLine[], k: number): LyricLine[] {
+  if (!Number.isFinite(k) || k <= 0 || Math.abs(k - 1) < 0.001) return lines
+  return lines.map((l) => ({
+    ...l,
+    time: l.time === null ? null : l.time * k,
+    words: l.words?.map((w) => ({ ...w, time: w.time * k }))
+  }))
+}
+
+/** A slowed / sped-up / nightcore version of a song (same rule as `is_speed_version` in lyrics.rs). */
+export function isSpeedVersion(title: string): boolean {
+  return /slowed|sped[\s_-]*up|speed[\s_-]*up|nightcore|daycore|замедл|ускор/i.test(title)
+}
+
+/**
+ * By how much to stretch lyrics timed for a recording `lyricsDuration` long so they fit a file
+ * `fileDuration` long: only for speed versions (a different length otherwise means a different
+ * edit, which no stretch can fix), and only within a sane range.
+ */
+export function stretchFactor(fileDuration: number, lyricsDuration: number | undefined, speedVersion: boolean): number {
+  if (!speedVersion || !lyricsDuration || fileDuration <= 0) return 1
+  const k = fileDuration / lyricsDuration
+  return k > 0.5 && k < 2 && Math.abs(k - 1) > 0.02 ? k : 1
+}
+
+/** 0..1 progress through line `i` at `time` (for the karaoke fill). */
+export function lineProgress(lines: LyricLine[], i: number, time: number, duration: number, pace?: number): number {
+  const start = lines[i]?.time ?? 0
+  if (pace) return Math.min(1, Math.max(0, (time - start) / sungLength(lines, i, duration, pace)))
   const next = lines[i + 1]?.time ?? Math.max(start + 4, duration)
   // a line is "sung" over at most ~6 s, long gaps are instrumental breaks
   const len = Math.max(0.5, Math.min(next - start, 6))

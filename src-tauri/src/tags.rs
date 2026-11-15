@@ -16,6 +16,8 @@ pub struct TagWrite {
     pub album: String,
     pub cover_path: Option<String>,
     pub lyrics: Option<String>,
+    /// `None`: leave the genre as it is; empty: remove it
+    pub genre: Option<String>,
     /// remove embedded pictures when `cover_path` is empty
     pub clear_cover: bool,
 }
@@ -39,6 +41,9 @@ pub fn write(t: &TagWrite) -> Result<(), String> {
     tag.remove_key(ItemKey::TrackArtists);
     set_or_remove(tag, &t.artist, |t, v| t.set_artist(v), |t| t.remove_artist());
     set_or_remove(tag, &t.album, |t, v| t.set_album(v), |t| t.remove_album());
+    if let Some(g) = &t.genre {
+        set_or_remove(tag, g, |t, v| t.set_genre(v), |t| t.remove_genre());
+    }
     if let Some(lyrics) = &t.lyrics {
         // ID3v2 keeps unsynchronised lyrics in USLT; LRC text is stored there as it is
         let key = if tag.tag_type() == TagType::Id3v2 {

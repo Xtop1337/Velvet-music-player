@@ -6,7 +6,7 @@ import type { Preset } from '@shared/types'
 import { formatRate, uid } from '@renderer/lib/format'
 import { presetLabel } from '@renderer/lib/tracks'
 import { useLibrary } from '@renderer/store/library'
-import { usePlayer } from '@renderer/store/player'
+import { trackSound, usePlayer } from '@renderer/store/player'
 import { useSettings } from '@renderer/store/settings'
 import { useUi } from '@renderer/store/ui'
 import { Slider, Toggle } from './ui'
@@ -24,7 +24,7 @@ export function SpeedPanel(): React.JSX.Element {
   const fx = usePlayer((s) => s.fx)
   const activePresetId = usePlayer((s) => s.activePresetId)
   const currentId = usePlayer((s) => s.currentId)
-  const trackPreset = useLibrary((s) => (currentId ? s.tracks[currentId]?.presetId : undefined))
+  const bound = useLibrary((s) => !!trackSound(currentId ? s.tracks[currentId] : undefined))
   const custom = useSettings((s) => s.settings.customPresets)
   const p = usePlayer.getState()
   const [naming, setNaming] = useState(false)
@@ -59,8 +59,8 @@ export function SpeedPanel(): React.JSX.Element {
 
   const bindToTrack = (on: boolean): void => {
     if (!currentId) return
-    useLibrary.getState().updateTrack(currentId, { presetId: on && activePresetId ? activePresetId : undefined })
-    if (on) useUi.getState().toast(t('speed.bound'), 'success')
+    usePlayer.getState().bindCurrent(on)
+    if (on) useUi.getState().toast(t('speed.bound', { rate: formatRate(rate) }), 'success')
   }
 
   return (
@@ -186,7 +186,7 @@ export function SpeedPanel(): React.JSX.Element {
           <label className="bind-row">
             <Link size={15} />
             <span>{t('speed.bindTrack')}</span>
-            <Toggle checked={!!trackPreset && trackPreset === activePresetId} onChange={bindToTrack} label={t('speed.bindTrack')} />
+            <Toggle checked={bound} onChange={bindToTrack} label={t('speed.bindTrack')} />
           </label>
         )}
       </section>

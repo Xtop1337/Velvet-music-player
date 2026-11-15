@@ -1,16 +1,18 @@
-import { Activity, AudioLines, CircleDot, Maximize, MicVocal, Minimize, Pencil, Sparkles, X } from 'lucide-react'
+import { Activity, AudioLines, CircleDot, Maximize, MicVocal, Minimize, Pencil, Radio, Sparkles, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { VisualizerMode } from '@shared/types'
 import { useAutoHide } from '@renderer/hooks/useAutoHide'
 import { formatRate } from '@renderer/lib/format'
-import { mediaUrl } from '@renderer/lib/media'
+import { coverSrc } from '@renderer/lib/media'
 import { trackArtist, trackTitle } from '@renderer/lib/tracks'
 import { useLibrary } from '@renderer/store/library'
 import { usePlayer } from '@renderer/store/player'
+import { useRadio } from '@renderer/store/radio'
 import { useSettings } from '@renderer/store/settings'
 import { useUi } from '@renderer/store/ui'
 import { LikeButton } from './LikeButton'
+import { RateButtons } from './RateButtons'
 import { Lyrics } from './Lyrics'
 import { Progress, SpeedPill, Transport, VolumeControl } from './PlayerBar'
 import { Cover, IconButton } from './ui'
@@ -173,7 +175,7 @@ export function NowPlaying(): React.JSX.Element | null {
   }, [open, setOpen])
 
   if (!open || !track) return null
-  const cover = track.coverPath ? mediaUrl(track.coverPath) : undefined
+  const cover = coverSrc(track)
   const bigCircle = tab === 'visual' && mode === 'circle'
 
   return (
@@ -184,9 +186,16 @@ export function NowPlaying(): React.JSX.Element | null {
           <X size={22} />
         </IconButton>
         <span>{t('player.nowPlaying')}</span>
-        <IconButton label={t('menu.editInfo')} onClick={() => editTags(track.id)}>
-          <Pencil size={18} />
-        </IconButton>
+        <div className="now-playing__actions">
+          <IconButton label={t('radio.fromTrack')} onClick={() => void useRadio.getState().start(track)}>
+            <Radio size={18} />
+          </IconButton>
+          {!track.stream && (
+            <IconButton label={t('menu.editInfo')} onClick={() => editTags(track.id)}>
+              <Pencil size={18} />
+            </IconButton>
+          )}
+        </div>
       </div>
 
       <div className="now-playing__body">
@@ -195,15 +204,24 @@ export function NowPlaying(): React.JSX.Element | null {
             <Visualizer mode="circle" coverUrl={cover} />
           </div>
         ) : (
-          <Cover path={track.coverPath} seed={track.id} className="now-playing__cover" />
+          <Cover path={track.coverPath} url={track.coverUrl} seed={track.id} className="now-playing__cover" />
         )}
         <div className="now-playing__info">
           <div className="now-playing__title-row">
             <h1>{trackTitle(track, t)}</h1>
-            <LikeButton trackId={track.id} size={26} className="like-btn--lg" />
+            {track.stream ? (
+              <RateButtons
+                song={{ artist: track.artist, title: track.title, genre: track.genre, url: track.stream.page ?? track.stream.link }}
+                size={22}
+                onDisliked={() => void usePlayer.getState().next()}
+              />
+            ) : (
+              <LikeButton trackId={track.id} size={26} className="like-btn--lg" />
+            )}
           </div>
           <p className="now-playing__artist">{trackArtist(track, t)}</p>
           {track.album && <p className="now-playing__album">{track.album}</p>}
+          {track.note && <p className="now-playing__note">{track.note}</p>}
           {Math.abs(rate - 1) > 0.001 && <span className="badge badge--accent">{formatRate(rate)}</span>}
           <div className="np-toolbar no-drag">
             <div className="np-tabs" role="tablist">
@@ -244,7 +262,7 @@ export function NowPlaying(): React.JSX.Element | null {
             <Visualizer mode={mode} coverUrl={cover} className="viz-stage__canvas" />
             <div ref={stageBar} className="viz-stage__bottom">
               <div className="viz-stage__meta">
-                <Cover path={track.coverPath} seed={track.id} size={64} rounded={12} />
+                <Cover path={track.coverPath} url={track.coverUrl} seed={track.id} size={64} rounded={12} />
                 <div>
                   <strong>{trackTitle(track, t)}</strong>
                   <span>{trackArtist(track, t)}</span>

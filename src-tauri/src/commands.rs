@@ -1,6 +1,7 @@
 //! The commands behind `window.velvet` (see src/bridge.ts).
 
 use crate::discord::DiscordOptions;
+use crate::spotify::SpotifyKeys;
 use crate::media::{AUDIO_EXTENSIONS, IMAGE_EXTENSIONS, VIDEO_EXTENSIONS};
 use crate::tags::TagWrite;
 use crate::types::*;
@@ -31,14 +32,31 @@ pub fn app_info(app: AppHandle) -> Value {
     })
 }
 
-/// Where audio and video are streamed from: `None` means the `velvet` protocol (Windows),
-/// otherwise the loopback server's base URL (Linux, see media_server.rs).
+/// The loopback media server's base URL (see media_server.rs). Linux always streams from it;
+/// Windows uses it when the page can reach it (checked by the UI), else the `velvet` protocol.
 #[tauri::command]
 pub fn media_base() -> Option<String> {
-    #[cfg(target_os = "linux")]
-    return crate::media_server::base();
-    #[cfg(not(target_os = "linux"))]
-    None
+    crate::media_server::base()
+}
+
+/// A line from the UI for velvet.log (playback errors, audio diagnostics). Capped per session.
+#[tauri::command]
+pub fn ui_log(level: String, message: String) {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static COUNT: AtomicUsize = AtomicUsize::new(0);
+    let n = COUNT.fetch_add(1, Ordering::Relaxed);
+    if n > 400 {
+        return;
+    }
+    let msg: String = message.chars().take(1200).collect();
+    match level.as_str() {
+        "error" => log::error!(target: "ui", "{msg}"),
+        "warn" => log::warn!(target: "ui", "{msg}"),
+        _ => log::info!(target: "ui", "{msg}"),
+    }
+    if n == 400 {
+        log::warn!(target: "ui", "(further UI messages are not logged)");
+    }
 }
 
 fn parse_hex(c: &str) -> Option<tauri::window::Color> {
@@ -56,8 +74,11 @@ pub fn window_theme(window: WebviewWindow, bg: String) {
     }
 }
 
+// Commands without `async` run on the UI thread: anything that touches the disk, the network or
+// another program is async, so WebView2 (audio, IPC, closing the window) never waits for it.
+
 #[tauri::command]
-pub fn open_external(app: AppHandle, url: String) -> R<()> {
+pub async fn open_external(app: AppHandle, url: String) -> R<()> {
     if !url.starts_with("https://") {
         return Ok(());
     }
@@ -65,8 +86,10 @@ pub fn open_external(app: AppHandle, url: String) -> R<()> {
 }
 
 #[tauri::command]
-pub fn store_load(name: String) -> R<Option<Value>> {
-    store::load(&name)
+pub async fn store_load(name: String) -> R<Option<Value>> {
+    tauri::async_runtime::spawn_blocking(move || store::load(&name))
+        .await
+        .map_err(err)?
 }
 
 #[tauri::command]
@@ -123,12 +146,14 @@ pub async fn library_scan(app: AppHandle, paths: Vec<String>) -> R<Vec<Track>> {
 }
 
 #[tauri::command]
-pub fn library_exists(paths: Vec<String>) -> Vec<bool> {
-    paths.iter().map(|p| std::path::Path::new(p).exists()).collect()
+pub async fn library_exists(paths: Vec<String>) -> Vec<bool> {
+    tauri::async_runtime::spawn_blocking(move || paths.iter().map(|p| std::path::Path::new(p).exists()).collect())
+        .await
+        .unwrap_or_default()
 }
 
 #[tauri::command]
-pub fn library_reveal(app: AppHandle, path: String) -> R<()> {
+pub async fn library_reveal(app: AppHandle, path: String) -> R<()> {
     app.opener().reveal_item_in_dir(path).map_err(err)
 }
 
@@ -234,16 +259,36 @@ pub async fn export_start(app: AppHandle, o: ExportOptions) -> ExportProgress {
 }
 
 #[tauri::command]
-pub async fn search_query(q: String, source: String) -> Value {
-    match search::search(&q, &source, 20).await {
+pub async fn search_query(q: String, source: String, spotify: Option<SpotifyKeys>) -> Value {
+    match search::search(&q, &source, 20, &spotify.unwrap_or_default()).await {
         Ok(results) => json!({ "results": results }),
         Err(e) => json!({ "results": [], "error": e }),
     }
 }
 
 #[tauri::command]
-pub async fn search_preview(url: String) -> R<String> {
-    search::preview_url(&url).await
+pub async fn search_preview(r: search::PreviewRequest) -> R<String> {
+    search::preview(&r).await
+}
+
+/// A playable stream for a track from the internet (radio, daily mixes).
+#[tauri::command]
+pub async fn stream_resolve(r: crate::stream::StreamRequest) -> R<crate::stream::StreamInfo> {
+    crate::stream::resolve(r).await
+}
+
+/// Downloads a stream into a temporary file ahead of playback; true when it is ready.
+#[tauri::command]
+pub async fn stream_prefetch(id: String) -> bool {
+    crate::stream::prefetch(&id).await
+}
+
+#[tauri::command]
+pub async fn recommend(req: crate::recommend::RecommendRequest) -> Value {
+    match crate::recommend::recommend(req).await {
+        Ok(results) => json!({ "results": results }),
+        Err(e) => json!({ "results": [], "error": e }),
+    }
 }
 
 #[tauri::command]
@@ -287,8 +332,8 @@ pub async fn update_check(app: AppHandle) {
 }
 
 #[tauri::command]
-pub fn update_open(app: AppHandle, state: State<AppState>) -> R<()> {
-    state.updater.open(&app)
+pub async fn update_open(app: AppHandle) -> R<()> {
+    app.state::<AppState>().updater.open(&app)
 }
 
 #[tauri::command]
@@ -319,6 +364,69 @@ pub async fn ytdlp_status() -> YtDlpStatus {
 #[tauri::command]
 pub async fn ytdlp_install() -> R<YtDlpStatus> {
     tools::install_ytdlp().await
+}
+
+/// Queues tracks for BPM / key / energy analysis (results arrive as `analysis:result` events).
+#[tauri::command]
+pub fn analysis_start(app: AppHandle, state: State<AppState>, items: Vec<crate::analysis::Item>) {
+    state.analysis.add(&app, items)
+}
+
+#[tauri::command]
+pub fn analysis_cancel(state: State<AppState>) {
+    state.analysis.cancel()
+}
+
+#[derive(serde::Deserialize)]
+pub struct MetaItem {
+    id: String,
+    #[serde(default)]
+    artist: String,
+    #[serde(default)]
+    title: String,
+    /// the song's SoundCloud page: its genre is asked there instead of the catalogue
+    #[serde(default)]
+    page: Option<String>,
+}
+
+/// Genre / year from Deezer for tracks without them (results arrive as `meta:result` events).
+#[tauri::command]
+pub fn meta_lookup(app: AppHandle, state: State<AppState>, items: Vec<MetaItem>) {
+    let items = items
+        .into_iter()
+        .map(|i| match i.page.filter(|p| p.starts_with("https://soundcloud.com/")) {
+            Some(p) => (i.id, format!("page:{p}"), i.title),
+            None => (i.id, i.artist, i.title),
+        })
+        .collect();
+    state.meta.add(&app, items)
+}
+
+/// Recommendations from the user's taste profile (Deezer graph; seconds, cached).
+#[tauri::command]
+pub async fn recommend_fast(req: crate::recommend::FastRequest) -> Value {
+    match crate::recommend::fast(req).await {
+        Ok(results) => json!({ "results": results }),
+        Err(e) => json!({ "results": [], "error": e }),
+    }
+}
+
+/// Songs the chosen service lists next to the user's own songs (My wave, mixes, recommendations).
+#[tauri::command]
+pub async fn wave_candidates(req: crate::recommend::WaveRequest) -> Value {
+    match crate::recommend::wave_candidates(req).await {
+        Ok(results) => json!({ "results": results }),
+        Err(e) => json!({ "results": [], "error": e }),
+    }
+}
+
+/// Songs similar to a track, for the radio.
+#[tauri::command]
+pub async fn radio_tracks(req: crate::recommend::RadioRequest) -> Value {
+    match crate::recommend::radio(req).await {
+        Ok(results) => json!({ "results": results }),
+        Err(e) => json!({ "results": [], "error": e }),
+    }
 }
 
 /// The main window has written its pending saves: the app may quit now.

@@ -22,6 +22,7 @@ function snapshot(): RemoteState {
     artist: t?.artist ?? '',
     album: t?.album ?? '',
     coverPath: t?.coverPath,
+    coverUrl: t?.coverPath ? undefined : t?.coverUrl,
     playing: p.playing,
     position: engine.currentTime,
     duration: p.duration,

@@ -1,7 +1,8 @@
 import { Heart, Play, Shuffle } from 'lucide-react'
 import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
-import { TrackList } from '@renderer/components/TrackList'
+import { LayoutToggle, useLayout } from '@renderer/components/LayoutToggle'
+import { TrackView } from '@renderer/components/TrackGrid'
 import { Button } from '@renderer/components/ui'
 import { formatTime } from '@renderer/lib/format'
 import { matchesQuery, totalDuration } from '@renderer/lib/tracks'
@@ -11,6 +12,7 @@ import { useUi } from '@renderer/store/ui'
 
 export function LikedPage(): React.JSX.Element {
   const { t } = useTranslation()
+  const [layout, setLayout] = useLayout('liked')
   const tracks = useLibrary((s) => s.tracks)
   const order = useLibrary((s) => s.order)
   const search = useUi((s) => s.search)
@@ -50,6 +52,8 @@ export function LikedPage(): React.JSX.Element {
             >
               {t('library.shuffle')}
             </Button>
+            <div className="toolbar__spacer" />
+            <LayoutToggle value={layout} onChange={setLayout} />
           </div>
         </div>
       </header>
@@ -59,7 +63,7 @@ export function LikedPage(): React.JSX.Element {
           <p>{t('liked.emptyText')}</p>
         </div>
       ) : (
-        <TrackList ids={shown} />
+        <TrackView ids={shown} layout={layout} />
       )}
     </div>
   )

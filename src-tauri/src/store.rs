@@ -5,7 +5,7 @@ use serde_json::Value;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-const NAMES: [&str; 3] = ["library", "settings", "history"];
+const NAMES: [&str; 5] = ["library", "settings", "history", "taste", "mixes"];
 
 fn file_for(name: &str) -> Result<PathBuf, String> {
     if !NAMES.contains(&name) {

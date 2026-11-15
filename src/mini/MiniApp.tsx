@@ -44,7 +44,7 @@ export function MiniApp(): React.JSX.Element {
   return (
     <div className="mini">
       <div className="mini__drag" />
-      {s?.trackId ? <Cover path={s.coverPath} seed={s.trackId} size={84} rounded={14} className="mini__cover" /> : <div className="mini__cover mini__cover--empty" />}
+      {s?.trackId ? <Cover path={s.coverPath} url={s.coverUrl} seed={s.trackId} size={84} rounded={14} className="mini__cover" /> : <div className="mini__cover mini__cover--empty" />}
       <div className="mini__body">
         <div className="mini__meta">
           <strong title={s?.title}>{s?.title || t.nothing}</strong>

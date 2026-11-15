@@ -116,6 +116,12 @@ impl Importer {
         let ctx = Ctx { app, job };
         ctx.emit();
         tauri::async_runtime::spawn(async move {
+            if let Some(m) = opts.matched.clone() {
+                if let Err(e) = run_match(&ctx, &m, &opts).await {
+                    ctx.fail(e);
+                }
+                return;
+            }
             let Some(link) = parse_music_link(&opts.url) else {
                 return ctx.fail("unsupported-link".into());
             };
@@ -242,6 +248,48 @@ async fn run_direct(ctx: &Ctx, url: &str, opts: &ImportOptions) -> Result<(), St
     Ok(())
 }
 
+/// One song known by its metadata: the audio comes from YouTube / SoundCloud, the tags and
+/// cover from the metadata.
+async fn run_match(ctx: &Ctx, m: &crate::types::MatchMeta, opts: &ImportOptions) -> Result<(), String> {
+    let bin = tools::require_ytdlp().await?;
+    ctx.update(|p| {
+        p.title = Some(format!("{} — {}", m.artist, m.title));
+        p.kind = Some("track".into());
+        p.total = 1;
+        p.state = "downloading".into();
+        p.current = Some(format!("{} — {}", m.artist, m.title));
+    });
+    let ff = ensure_ffmpeg(ctx, opts).await?;
+    let page = match m.page.clone().filter(|p| parse_music_link(p).map(|l| l.service != "spotify" && l.kind == "track").unwrap_or(false)) {
+        Some(p) => p,
+        None => {
+            let item = SpotifyItem {
+                title: m.title.clone(),
+                artists: m.artist.split(", ").map(str::trim).filter(|a| !a.is_empty()).map(String::from).collect(),
+                duration_ms: m.duration * 1000.0,
+                album: m.album.clone(),
+                ..Default::default()
+            };
+            find_audio(&bin, &item, m.prefer.as_deref() == Some("soundcloud"))
+                .await
+                .ok_or_else(|| format!("not-found: {}", m.title))?
+                .url
+        }
+    };
+    let source = if page.contains("soundcloud.com") { "soundcloud" } else { "youtube" };
+    let meta = DownloadMeta {
+        title: m.title.clone(),
+        artist: m.artist.clone(),
+        album: m.album.clone(),
+        cover_url: m.cover_url.clone(),
+        source_url: page.clone(),
+    };
+    let track = download(ctx, &bin, ff.as_deref(), &page, opts, Some(meta), source).await?;
+    ctx.add_track(track);
+    ctx.finish();
+    Ok(())
+}
+
 async fn run_spotify(ctx: &Ctx, kind: &str, id: &str, opts: &ImportOptions) -> Result<(), String> {
     let release = spotify::fetch(kind, id, opts.spotify_client_id.as_deref(), opts.spotify_client_secret.as_deref()).await?;
     if ctx.cancelled() {
@@ -270,7 +318,7 @@ async fn run_spotify(ctx: &Ctx, kind: &str, id: &str, opts: &ImportOptions) -> R
             } else {
                 item
             };
-            let m = find_audio(&bin, &item).await.ok_or_else(|| format!("not-found: {}", item.title))?;
+            let m = find_audio(&bin, &item, false).await.ok_or_else(|| format!("not-found: {}", item.title))?;
             let meta = DownloadMeta {
                 title: item.title.clone(),
                 artist: item.artists.join(", "),
@@ -294,14 +342,38 @@ async fn run_spotify(ctx: &Ctx, kind: &str, id: &str, opts: &ImportOptions) -> R
     Ok(())
 }
 
-async fn find_audio(bin: &str, item: &SpotifyItem) -> Option<Candidate> {
+/// The genre in yt-dlp's description of a page.
+pub fn source_genre(info: &Value) -> Option<String> {
+    s(info, "genre")
+        .or_else(|| {
+            info.get("genres")
+                .and_then(Value::as_array)
+                .and_then(|g| g.iter().find_map(|x| x.as_str().map(str::trim).filter(|x| !x.is_empty()).map(String::from)))
+        })
+        .map(|g| g.trim().to_string())
+        .filter(|g| !g.is_empty() && g.chars().count() <= 40)
+}
+
+/// The genre of a SoundCloud page (for tracks downloaded before genres were kept).
+pub async fn page_genre(url: &str) -> Option<String> {
+    let bin = tools::require_ytdlp().await.ok()?;
+    let info = tools::ytdlp_json(&bin, &["--no-playlist".into(), url.to_string()], Duration::from_secs(45)).await.ok()?;
+    source_genre(&info)
+}
+
+/// The YouTube / SoundCloud upload that best matches a Spotify track.
+pub(crate) async fn find_audio(bin: &str, item: &SpotifyItem, soundcloud_first: bool) -> Option<Candidate> {
     let want = Want {
         title: &item.title,
         artists: &item.artists,
         duration_sec: item.duration_ms / 1000.0,
     };
     let query = format!("{} - {}", item.artists.join(" "), item.title);
-    for search in [format!("ytsearch6:{query} audio"), format!("scsearch5:{query}")] {
+    let mut order = [format!("ytsearch6:{query} audio"), format!("scsearch5:{query}")];
+    if soundcloud_first {
+        order.reverse();
+    }
+    for search in order {
         let Ok(res) = tools::ytdlp_json(bin, &["--flat-playlist".into(), search], Duration::from_secs(60)).await else {
             continue;
         };
@@ -380,7 +452,7 @@ async fn download(
         "--progress-template".into(),
         format!("download:{PROG} %(progress.downloaded_bytes)s %(progress.total_bytes)s %(progress.total_bytes_estimate)s"),
         "--print".into(),
-        format!("after_move:{DONE} %(.{{id,title,uploader,artist,album,track,thumbnail,duration,webpage_url,filepath}})j"),
+        format!("after_move:{DONE} %(.{{id,title,uploader,artist,album,track,thumbnail,duration,webpage_url,filepath,genre,genres}})j"),
     ]);
     if opts.format != "best" {
         args.extend(["--audio-format".into(), opts.format.clone(), "--audio-quality".into(), "0".into()]);
@@ -439,6 +511,10 @@ async fn download(
         .unwrap_or_default();
     if track.duration == 0.0 {
         track.duration = info.get("duration").and_then(Value::as_f64).unwrap_or(0.0);
+    }
+    // the genre the service gives the song (SoundCloud: "Phonk", "Funk"…) says more than a catalogue's
+    if track.genre.is_none() {
+        track.genre = source_genre(&info);
     }
     track.source_url = Some(
         meta.as_ref()

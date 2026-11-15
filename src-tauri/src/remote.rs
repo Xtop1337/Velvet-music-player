@@ -153,7 +153,14 @@ impl Remote {
         failed
     }
 
+    /// Creates the tray icon (once). Tray calls go through the UI thread, so the work is posted
+    /// there instead of waiting for it from a command thread.
     pub fn ensure_tray(&self, app: &AppHandle) {
+        let app2 = app.clone();
+        let _ = app.run_on_main_thread(move || app2.state::<crate::AppState>().remote.ensure_tray_now(&app2));
+    }
+
+    fn ensure_tray_now(&self, app: &AppHandle) {
         if self.tray.lock().unwrap().is_some() {
             return;
         }
@@ -183,12 +190,16 @@ impl Remote {
         if let Ok(tray) = b.build(app) {
             *self.tray.lock().unwrap() = Some(tray);
         }
-        self.update_tray(app);
+        self.update_tray_now(app);
     }
 
     fn update_tray(&self, app: &AppHandle) {
-        let tray = self.tray.lock().unwrap();
-        let Some(tray) = tray.as_ref() else { return };
+        let app2 = app.clone();
+        let _ = app.run_on_main_thread(move || app2.state::<crate::AppState>().remote.update_tray_now(&app2));
+    }
+
+    fn update_tray_now(&self, app: &AppHandle) {
+        let Some(tray) = self.tray.lock().unwrap().clone() else { return };
         let s = self.strings();
         let st = self.state.lock().unwrap().clone();
         let now = match &st {
@@ -302,20 +313,25 @@ impl Remote {
         self.smtc_playing.store(s.playing, Ordering::SeqCst);
         let track_changed = {
             let mut last = self.smtc_track.lock().unwrap();
-            let key = format!("{:?}|{}|{}|{:?}", s.track_id, s.title, s.artist, s.cover_path);
+            let key = format!("{:?}|{}|{}|{:?}|{:?}", s.track_id, s.title, s.artist, s.cover_path, s.cover_url);
             let changed = last.as_deref() != Some(key.as_str());
             *last = Some(key);
             changed
         };
         let s = s.clone();
         let app2 = app.clone();
-        // the system media controls belong to the UI thread
+        // The system media controls belong to the UI thread. Nothing here may wait there: while
+        // that thread is blocked WebView2 gets no answers (no audio, no IPC, the window can't close).
         let _ = app.run_on_main_thread(move || {
             let remote = app2.state::<crate::AppState>();
             let mut guard = remote.remote.smtc.lock().unwrap();
             let Some(Smtc(controls)) = guard.as_mut() else { return };
             if track_changed {
-                let cover = s.cover_path.as_ref().map(|p| format!("file://{p}"));
+                let cover = s
+                    .cover_path
+                    .as_deref()
+                    .and_then(smtc_cover_url)
+                    .or_else(|| s.cover_url.clone().filter(|u| u.starts_with("https://")));
                 let _ = controls.set_metadata(souvlaki::MediaMetadata {
                     title: Some(&s.title).filter(|t| !t.is_empty()).map(|t| t.as_str()),
                     artist: Some(&s.artist).filter(|t| !t.is_empty()).map(|t| t.as_str()),
@@ -338,10 +354,14 @@ impl Remote {
 
     pub fn dispose(&self, app: &AppHandle) {
         let _ = app.global_shortcut().unregister_all();
-        if let Some(tray) = self.tray.lock().unwrap().take() {
-            let _ = tray.set_visible(false);
-        }
-        self.smtc.lock().unwrap().take();
+        let app2 = app.clone();
+        let _ = app.run_on_main_thread(move || {
+            let remote = &app2.state::<crate::AppState>().remote;
+            if let Some(tray) = remote.tray.lock().unwrap().take() {
+                let _ = tray.set_visible(false);
+            }
+            remote.smtc.lock().unwrap().take();
+        });
     }
 }
 
@@ -349,13 +369,43 @@ impl Remote {
 struct Smtc(souvlaki::MediaControls);
 unsafe impl Send for Smtc {}
 
+/// The cover for the Windows media overlay, as a loopback http link.
+///
+/// souvlaki loads `file://` covers with `StorageFile::GetFileFromPathAsync(..).join()`, a blocking
+/// wait on the UI thread that can deadlock it (no sound, no IPC, the window can't be closed).
+/// An http link is read lazily by Windows instead.
+fn smtc_cover_url(path: &str) -> Option<String> {
+    let ext = crate::media::ext(std::path::Path::new(path));
+    if !crate::media::IMAGE_EXTENSIONS.contains(&ext.as_str()) {
+        return None;
+    }
+    let base = crate::media_server::base()?;
+    Some(format!("{base}{}", percent_encoding::utf8_percent_encode(path, percent_encoding::NON_ALPHANUMERIC)))
+}
+
+/// Opens or closes the mini player.
+///
+/// Creating a WebView2 window waits for the UI thread's message loop, so it must not happen on
+/// that thread (a tray click, a shortcut, a synchronous command): that froze Windows. The window
+/// is built from a background task instead.
 pub fn toggle_mini(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("mini") {
         let _ = w.close();
         return;
     }
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move { build_mini(&app) });
+}
+
+fn build_mini(app: &AppHandle) {
+    static BUILDING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let Ok(_one) = BUILDING.try_lock() else { return };
+    if app.get_webview_window("mini").is_some() {
+        return;
+    }
     let on_top = app.state::<crate::AppState>().remote.prefs.lock().unwrap().mini_on_top;
-    let built = WebviewWindowBuilder::new(app, "mini", crate::ui_url("#mini"))
+    #[allow(unused_mut)]
+    let mut builder = WebviewWindowBuilder::new(app, "mini", crate::ui_url("#mini"))
         .title("Velvet Mini")
         .inner_size(400.0, 128.0)
         .min_inner_size(320.0, 128.0)
@@ -371,21 +421,40 @@ pub fn toggle_mini(app: &AppHandle) {
             if p.event() == PageLoadEvent::Finished {
                 let _ = w.show();
             }
-        })
-        .build();
-    if let Ok(w) = built {
-        let app2 = app.clone();
-        w.on_window_event(move |e| {
-            if let tauri::WindowEvent::Destroyed = e {
-                let _ = app2.emit_to("main", "mini:closed", ());
-            }
         });
+    // the same WebView2 flags as the main window, or Windows refuses to create this one
+    #[cfg(windows)]
+    {
+        builder = builder.additional_browser_args(crate::BROWSER_ARGS);
+    }
+    match builder.build() {
+        Ok(w) => {
+            let app2 = app.clone();
+            w.on_window_event(move |e| {
+                if let tauri::WindowEvent::Destroyed = e {
+                    let _ = app2.emit_to("main", "mini:closed", ());
+                }
+            });
+        }
+        Err(e) => {
+            log::error!("mini player: {e}");
+            let _ = app.emit_to("main", "mini:closed", ());
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn gives_the_media_overlay_an_http_cover() {
+        let base = crate::media_server::start().await.unwrap();
+        let url = smtc_cover_url(r"C:\Users\Анна\AppData\Roaming\Velvet\covers\a b.jpg").unwrap();
+        assert!(url.starts_with(&base) && url.starts_with("http://127.0.0.1:"), "{url}");
+        assert!(url.ends_with("a%20b%2Ejpg"), "{url}");
+        assert!(smtc_cover_url("/music/song.mp3").is_none());
+    }
 
     #[test]
     fn converts_combos_to_accelerators() {

@@ -44,6 +44,8 @@ pub struct DiscordOptions {
     pub show_speed: bool,
     pub show_buttons: bool,
     pub lookup_covers: bool,
+    /// local tracks: when no cover is found online, upload the track's own (public link)
+    pub upload_covers: bool,
     /// remove the activity while paused instead of showing "Paused"
     pub hide_when_paused: bool,
 }
@@ -173,7 +175,7 @@ pub async fn lookup_cover_url(artist: &str, title: &str) -> Option<String> {
     let term = format!("{artist} {title}").trim().to_string();
     // a network problem is not cached: it is tried again next time
     let res = crate::net::client()
-        .get("https://itunes.apple.com/search")
+        .get(std::env::var("VELVET_ITUNES_URL").unwrap_or_else(|_| "https://itunes.apple.com/search".into()))
         .query(&[("term", term.as_str()), ("media", "music"), ("entity", "song"), ("limit", "5")])
         .send()
         .await
@@ -202,6 +204,116 @@ pub async fn lookup_cover_url(artist: &str, title: &str) -> Option<String> {
     map.insert(key, url.clone());
     let _ = std::fs::write(cover_cache_file(), serde_json::to_string(map).unwrap_or_default());
     url
+}
+
+// ── the track's own cover, uploaded (when nothing is found online) ──────────────
+
+static UPLOAD_CACHE: Mutex<Option<HashMap<String, String>>> = Mutex::new(None);
+/// covers whose upload failed in this session (not retried on every play / pause)
+static UPLOAD_FAILED: Mutex<Option<HashMap<String, Instant>>> = Mutex::new(None);
+const UPLOAD_RETRY: Duration = Duration::from_secs(10 * 60);
+/// Discord shows the large image at up to 300 px; 512 keeps it sharp on any screen.
+const UPLOAD_SIZE: u32 = 512;
+
+fn upload_cache_file() -> std::path::PathBuf {
+    paths::cache().join("cover-upload.json")
+}
+
+fn upload_url() -> String {
+    std::env::var("VELVET_COVER_UPLOAD_URL").unwrap_or_else(|_| "https://catbox.moe/user/api.php".into())
+}
+
+/// The cover as a small JPEG (what is uploaded), or `None` if it isn't a readable image.
+pub fn cover_jpeg(path: &str) -> Option<Vec<u8>> {
+    let img = image::open(path).ok()?;
+    let img = if img.width() > UPLOAD_SIZE || img.height() > UPLOAD_SIZE {
+        img.thumbnail(UPLOAD_SIZE, UPLOAD_SIZE)
+    } else {
+        img
+    };
+    let mut out = Vec::new();
+    image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 86)
+        .encode_image(&img.to_rgb8())
+        .ok()?;
+    Some(out)
+}
+
+/// A public https link to the track's own cover. Each cover is uploaded once: links are
+/// remembered by the image's hash (`cache/cover-upload.json`).
+pub async fn upload_cover(path: &str) -> Option<String> {
+    let bytes = tokio::fs::read(path).await.ok()?;
+    let hash = {
+        use sha2::Digest;
+        hex::encode(sha2::Sha256::digest(&bytes))
+    };
+    {
+        let mut cache = UPLOAD_CACHE.lock().unwrap();
+        let map = cache.get_or_insert_with(|| {
+            std::fs::read_to_string(upload_cache_file())
+                .ok()
+                .and_then(|t| serde_json::from_str(&t).ok())
+                .unwrap_or_default()
+        });
+        if let Some(url) = map.get(&hash) {
+            return Some(url.clone());
+        }
+        let failed = UPLOAD_FAILED.lock().unwrap();
+        if failed.as_ref().and_then(|f| f.get(&hash)).map(|at| at.elapsed() < UPLOAD_RETRY).unwrap_or(false) {
+            return None;
+        }
+    }
+    let p = path.to_string();
+    let jpeg = tokio::task::spawn_blocking(move || cover_jpeg(&p)).await.ok().flatten();
+    let url = match jpeg {
+        Some(jpeg) => send_cover(jpeg).await,
+        None => None,
+    };
+    match &url {
+        Some(u) => {
+            let mut cache = UPLOAD_CACHE.lock().unwrap();
+            let map = cache.get_or_insert_with(HashMap::new);
+            map.insert(hash, u.clone());
+            let _ = std::fs::write(upload_cache_file(), serde_json::to_string(map).unwrap_or_default());
+        }
+        None => {
+            log::warn!("Discord: the cover could not be uploaded");
+            UPLOAD_FAILED.lock().unwrap().get_or_insert_with(HashMap::new).insert(hash, Instant::now());
+        }
+    }
+    url
+}
+
+async fn send_cover(jpeg: Vec<u8>) -> Option<String> {
+    let part = reqwest::multipart::Part::bytes(jpeg).file_name("cover.jpg").mime_str("image/jpeg").ok()?;
+    let form = reqwest::multipart::Form::new().text("reqtype", "fileupload").part("fileToUpload", part);
+    let res = crate::net::client()
+        .post(upload_url())
+        .multipart(form)
+        .timeout(Duration::from_secs(45))
+        .send()
+        .await
+        .ok()?;
+    if !res.status().is_success() {
+        return None;
+    }
+    let text = res.text().await.ok()?;
+    let url = text.trim();
+    (url.starts_with("https://") && !url.contains(char::is_whitespace) && url.len() < 300).then(|| url.to_string())
+}
+
+/// Where Discord's cover comes from for a track without a public one: an online lookup
+/// first, then the track's own cover uploaded, otherwise (`None`) Velvet's logo.
+pub async fn find_cover(np: &NowPlaying, lookup: bool, upload: bool) -> Option<String> {
+    if lookup && (!np.title.is_empty() || !np.artist.is_empty()) {
+        if let Some(url) = lookup_cover_url(&np.artist, &np.title).await {
+            return Some(url);
+        }
+    }
+    let path = np.cover_path.as_deref().filter(|p| !p.is_empty())?;
+    if upload {
+        return upload_cover(path).await;
+    }
+    None
 }
 
 // ── presence state machine ─────────────────────────────────────────────────────
@@ -233,6 +345,8 @@ pub struct Presence<T: Transport> {
     status: Arc<Mutex<String>>,
     on_status: StatusFn,
     on_cover: CoverFn,
+    /// the track a cover is being (or was) looked for, so it's done once per track
+    cover_for: Option<String>,
 }
 
 /// The user's own application if they set a valid one, otherwise Velvet's.
@@ -290,6 +404,7 @@ impl<T: Transport> Presence<T> {
                 self.pending = Some(self.current.clone());
                 self.last_sent = None;
                 self.last_playing = None;
+                self.find_cover();
             }
             Err(_) => {
                 self.t.close().await;
@@ -308,24 +423,37 @@ impl<T: Transport> Presence<T> {
     }
 
     fn update(&mut self, p: Option<NowPlaying>) {
-        if let Some(np) = &p {
-            if np.cover_url.is_none() && self.opts.lookup_covers && (!np.title.is_empty() || !np.artist.is_empty()) {
-                let (tx, id, artist, title) = (self.tx.clone(), np.track_id.clone(), np.artist.clone(), np.title.clone());
-                tokio::spawn(async move {
-                    if let Some(url) = lookup_cover_url(&artist, &title).await {
-                        let _ = tx.send(Msg::Cover(id, url));
-                    }
-                });
-            }
-        }
         self.current = p.clone();
         self.pending = Some(p);
+        self.find_cover();
+    }
+
+    /// Looks for a public cover of the current track, once per track, and only while Discord is
+    /// connected: nothing is looked up or uploaded for a presence nobody sees.
+    fn find_cover(&mut self) {
+        let Some(np) = self.current.as_ref().filter(|_| self.connected) else { return };
+        let public = np.cover_url.as_deref().map(|u| u.starts_with("https://")).unwrap_or(false);
+        let (lookup, upload) = (self.opts.lookup_covers, self.opts.upload_covers);
+        if public || !(lookup || upload) || self.cover_for.as_deref() == Some(np.track_id.as_str()) {
+            return;
+        }
+        self.cover_for = Some(np.track_id.clone());
+        let (tx, np) = (self.tx.clone(), np.clone());
+        tokio::spawn(async move {
+            if let Some(url) = find_cover(&np, lookup, upload).await {
+                let _ = tx.send(Msg::Cover(np.track_id, url));
+            }
+        });
     }
 
     async fn handle(&mut self, msg: Msg) -> bool {
         match msg {
             Msg::Configure(o) => {
                 let reconnect = effective_id(&o) != effective_id(&self.opts) || o.enabled != self.opts.enabled;
+                if o.lookup_covers != self.opts.lookup_covers || o.upload_covers != self.opts.upload_covers {
+                    // the cover of the current track is looked for again with the new options
+                    self.cover_for = None;
+                }
                 self.opts = o;
                 if !reconnect {
                     if let Some(c) = self.current.clone() {
@@ -428,6 +556,7 @@ impl Discord {
             status: status.clone(),
             on_status,
             on_cover,
+            cover_for: None,
         };
         crate::spawn(p.run(rx));
         Self { tx, status }
@@ -474,6 +603,7 @@ mod tests {
             artist: "Neon Coast".into(),
             album: "Afterglow".into(),
             cover_url: Some("https://i1.sndcdn.com/artworks-x-t500x500.jpg".into()),
+            cover_path: None,
             source_url: Some("https://soundcloud.com/neon/midnight-drive".into()),
             duration: 200.0,
             position: 50.0,
@@ -569,6 +699,7 @@ mod tests {
             show_speed: true,
             show_buttons: true,
             lookup_covers: false,
+            upload_covers: false,
             hide_when_paused,
         });
         tokio::time::sleep(Duration::from_secs(3)).await;
@@ -676,5 +807,148 @@ mod tests {
         });
         tokio::time::sleep(Duration::from_millis(100)).await;
         assert_eq!(d.status(), "disabled");
+    }
+
+    // ── covers: lookup → own cover uploaded → logo ─────────────────────────────
+
+    struct CoverEnv {
+        dir: std::path::PathBuf,
+    }
+
+    impl CoverEnv {
+        fn new(upload: &str, itunes: &str) -> Self {
+            let dir = std::env::temp_dir().join(format!("velvet-cover-{}", uuid::Uuid::new_v4()));
+            std::fs::create_dir_all(&dir).unwrap();
+            std::env::set_var("VELVET_DATA_DIR", &dir);
+            std::env::set_var("VELVET_COVER_UPLOAD_URL", upload);
+            std::env::set_var("VELVET_ITUNES_URL", itunes);
+            *UPLOAD_CACHE.lock().unwrap() = None;
+            *UPLOAD_FAILED.lock().unwrap() = None;
+            *COVER_CACHE.lock().unwrap() = None;
+            Self { dir }
+        }
+
+        /// A 900×600 PNG cover like the ones in the covers folder.
+        fn cover(&self, seed: u8) -> String {
+            let img = image::RgbImage::from_fn(900, 600, |x, y| image::Rgb([seed, (x % 255) as u8, (y % 255) as u8]));
+            let p = self.dir.join(format!("cover-{seed}.png"));
+            img.save(&p).unwrap();
+            p.to_string_lossy().into_owned()
+        }
+    }
+
+    impl Drop for CoverEnv {
+        fn drop(&mut self) {
+            for k in ["VELVET_DATA_DIR", "VELVET_COVER_UPLOAD_URL", "VELVET_ITUNES_URL"] {
+                std::env::remove_var(k);
+            }
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+    }
+
+    fn local(path: Option<String>) -> NowPlaying {
+        NowPlaying {
+            track_id: "local-1".into(),
+            cover_url: None,
+            cover_path: path,
+            source_url: None,
+            ..base()
+        }
+    }
+
+    #[tokio::test]
+    async fn uploads_the_tracks_own_cover_once_when_nothing_is_found_online() {
+        let _env = crate::paths::TEST_ENV.lock().await;
+        let mock = crate::testutil::serve(vec![
+            ("/itunes", 200, json!({ "results": [] }).to_string()),
+            ("/upload", 200, "https://files.catbox.moe/ab12cd.jpg\n".into()),
+        ])
+        .await;
+        let env = CoverEnv::new(&format!("{}/upload", mock.base), &format!("{}/itunes", mock.base));
+        let np = local(Some(env.cover(10)));
+
+        assert_eq!(find_cover(&np, true, true).await.as_deref(), Some("https://files.catbox.moe/ab12cd.jpg"));
+        {
+            let seen = mock.seen.lock().unwrap();
+            assert!(seen[0].line.starts_with("GET /itunes"), "the online lookup comes first");
+            let up = &seen[1];
+            assert!(up.line.starts_with("POST /upload"));
+            let body = String::from_utf8_lossy(&up.body);
+            assert!(body.contains("name=\"reqtype\"") && body.contains("fileupload") && body.contains("name=\"fileToUpload\""));
+            // a small JPEG, not the original PNG
+            let jpeg_at = up.body.windows(3).position(|w| w == [0xFF, 0xD8, 0xFF]).expect("jpeg data");
+            let img = image::load_from_memory(&up.body[jpeg_at..]).unwrap();
+            assert_eq!((img.width(), img.height()), (512, 341));
+        }
+        // the same image again (another track, after a restart) reuses the link
+        *UPLOAD_CACHE.lock().unwrap() = None;
+        assert_eq!(find_cover(&np, false, true).await.as_deref(), Some("https://files.catbox.moe/ab12cd.jpg"));
+        assert_eq!(mock.seen.lock().unwrap().len(), 2);
+        assert!(std::fs::read_to_string(env.dir.join("cache/cover-upload.json")).unwrap().contains("ab12cd"));
+    }
+
+    #[tokio::test]
+    async fn prefers_a_cover_found_online_and_falls_back_to_the_logo() {
+        let _env = crate::paths::TEST_ENV.lock().await;
+        let found = json!({ "results": [{ "trackName": "Midnight Drive", "artworkUrl100": "https://is1-ssl.mzstatic.com/a/100x100bb.jpg" }] });
+        let mock = crate::testutil::serve(vec![("/itunes", 200, found.to_string()), ("/upload", 500, "down".into())]).await;
+        let env = CoverEnv::new(&format!("{}/upload", mock.base), &format!("{}/itunes", mock.base));
+        let np = local(Some(env.cover(20)));
+        assert_eq!(find_cover(&np, true, true).await.as_deref(), Some("https://is1-ssl.mzstatic.com/a/600x600bb.jpg"));
+        assert_eq!(mock.seen.lock().unwrap().len(), 1, "nothing uploaded");
+
+        // lookup off and the upload host down: the logo (None), and no retry on every pause
+        assert_eq!(find_cover(&np, false, true).await, None);
+        assert_eq!(find_cover(&np, false, true).await, None);
+        assert_eq!(mock.seen.lock().unwrap().len(), 2);
+        // no own cover, or uploading switched off: the logo
+        assert_eq!(find_cover(&local(None), false, true).await, None);
+        assert_eq!(find_cover(&local(Some(env.cover(30))), false, false).await, None);
+        assert_eq!(mock.seen.lock().unwrap().len(), 2);
+        let a = build_activity(&local(None), false, false, 0);
+        assert_eq!(a["assets"]["large_image"], format!("{ASSETS}/logo.png"));
+    }
+
+    #[tokio::test]
+    async fn the_presence_shows_the_uploaded_cover() {
+        let _env = crate::paths::TEST_ENV.lock().await;
+        let mock = crate::testutil::serve(vec![("/upload", 200, "https://files.catbox.moe/zz99.jpg".into())]).await;
+        let env = CoverEnv::new(&format!("{}/upload", mock.base), &format!("{}/itunes", mock.base));
+        let fake = Fake::default();
+        let covers = Arc::new(Mutex::new(Vec::<(String, String)>::new()));
+        let seen = covers.clone();
+        let d = Discord::start(
+            fake.clone(),
+            Box::new(|_, _| {}),
+            Box::new(move |id, url| seen.lock().unwrap().push((id.to_string(), url.to_string()))),
+        );
+        // Discord off: nothing is looked up or uploaded
+        d.configure(DiscordOptions {
+            enabled: false,
+            upload_covers: true,
+            ..Default::default()
+        });
+        d.update(Some(local(Some(env.cover(40)))));
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert!(mock.seen.lock().unwrap().is_empty());
+        assert!(covers.lock().unwrap().is_empty());
+        // once connected, the playing track's cover is uploaded
+        d.configure(DiscordOptions {
+            enabled: true,
+            upload_covers: true,
+            ..Default::default()
+        });
+        for _ in 0..100 {
+            if fake.acts.lock().unwrap().iter().any(|a| a["assets"]["large_image"] == "https://files.catbox.moe/zz99.jpg") {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        assert_eq!(*covers.lock().unwrap(), vec![("local-1".to_string(), "https://files.catbox.moe/zz99.jpg".to_string())]);
+        assert!(fake.acts.lock().unwrap().iter().any(|a| a["assets"]["large_image"] == "https://files.catbox.moe/zz99.jpg"));
+        // further updates of the same track don't start another upload
+        d.update(Some(NowPlaying { playing: false, ..local(Some(env.cover(40))) }));
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert_eq!(mock.seen.lock().unwrap().len(), 1);
     }
 }

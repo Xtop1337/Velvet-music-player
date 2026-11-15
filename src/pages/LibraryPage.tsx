@@ -2,7 +2,9 @@ import { FilePlus2, FolderPlus, Link2, Music, Play, Search, Shuffle } from 'luci
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { AlbumGrid, ArtistGrid } from '@renderer/components/CardGrid'
-import { TrackList, type TrackListSort } from '@renderer/components/TrackList'
+import { LayoutToggle, useLayout } from '@renderer/components/LayoutToggle'
+import { TrackView } from '@renderer/components/TrackGrid'
+import { type TrackListSort } from '@renderer/components/TrackList'
 import { Button, Segmented } from '@renderer/components/ui'
 import { addPicked } from '@renderer/lib/addMusic'
 import { formatTime } from '@renderer/lib/format'
@@ -31,6 +33,7 @@ function remember(key: string, value: string): void {
 
 export function LibraryPage(): React.JSX.Element {
   const { t } = useTranslation()
+  const [layout, setLayout] = useLayout('library')
   const order = useLibrary((s) => s.order)
   const tracks = useLibrary((s) => s.tracks)
   const search = useUi((s) => s.search)
@@ -128,13 +131,14 @@ export function LibraryPage(): React.JSX.Element {
                 value={sort.key}
                 onChange={(e) => changeSort({ key: e.target.value as SortKey, desc: e.target.value === 'added' || e.target.value === 'plays' })}
               >
-                {(['added', 'title', 'artist', 'album', 'duration', 'plays'] as const).map((k) => (
+                {(['added', 'title', 'artist', 'album', 'duration', 'plays', 'bpm', 'key'] as const).map((k) => (
                   <option key={k} value={k}>
                     {t(`sort.${k}`)}
                   </option>
                 ))}
               </select>
             )}
+            {mode === 'tracks' && <LayoutToggle value={layout} onChange={setLayout} />}
             <Segmented<Mode>
               label={t('library.view')}
               value={mode}
@@ -153,7 +157,7 @@ export function LibraryPage(): React.JSX.Element {
           ) : mode === 'artists' ? (
             <ArtistGrid artists={artists} />
           ) : (
-            <TrackList ids={ids} sort={sort} onSort={changeSort} />
+            <TrackView ids={ids} layout={layout} sort={sort} onSort={changeSort} />
           )}
         </>
       )}

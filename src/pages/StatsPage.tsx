@@ -15,6 +15,19 @@ function hoursMinutes(sec: number, t: (k: string, o?: Record<string, unknown>) =
   return h ? t('stats.hm', { h, m }) : t('stats.m', { m })
 }
 
+/** A row with a bar showing its share of the largest one. */
+function ShareRow({ label, seconds, total, sub }: { label: string; seconds: number; total: number; sub: string }): React.JSX.Element {
+  return (
+    <li className="share-row">
+      <span className="share-row__label">{label}</span>
+      <span className="share-row__bar">
+        <span style={{ width: `${Math.max(3, (seconds / (total || 1)) * 100)}%` }} />
+      </span>
+      <small>{sub}</small>
+    </li>
+  )
+}
+
 export function StatsPage(): React.JSX.Element {
   const { t, i18n } = useTranslation()
   const [period, setPeriod] = useState<Period>('30d')
@@ -140,6 +153,43 @@ export function StatsPage(): React.JSX.Element {
               </ol>
             </section>
           </div>
+
+          {(sum.genres.length > 0 || sum.decades.length > 0) && (
+            <div className="stats-grid">
+              <section className="card">
+                <h3 className="card__subtitle">{t('stats.genres')}</h3>
+                {sum.genres.length ? (
+                  <ul className="share-list">
+                    {sum.genres.map((r) => (
+                      <ShareRow key={r.key} label={t(`genres.${r.key}`)} seconds={r.seconds} total={sum.genres[0].seconds} sub={hoursMinutes(r.seconds, t)} />
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="muted small">{t('stats.noGenres')}</p>
+                )}
+                {sum.unknownGenreSeconds > 0 && sum.genres.length > 0 && <p className="muted small">{t('stats.unknownGenre', { time: hoursMinutes(sum.unknownGenreSeconds, t) })}</p>}
+              </section>
+              <section className="card">
+                <h3 className="card__subtitle">{t('stats.decades')}</h3>
+                {sum.decades.length ? (
+                  <div className="decade-bars">
+                    {sum.decades.map((r) => {
+                      const max = Math.max(...sum.decades.map((d) => d.seconds))
+                      return (
+                        <div key={r.key} className="decade-bars__col" title={hoursMinutes(r.seconds, t)}>
+                          <span className="decade-bars__bar" style={{ height: `${Math.max(4, (r.seconds / max) * 100)}%` }} />
+                          <small>{t('stats.decade', { decade: r.key.slice(2) })}</small>
+                        </div>
+                      )
+                    })}
+                  </div>
+                ) : (
+                  <p className="muted small">{t('stats.noYears')}</p>
+                )}
+                {sum.unknownYearSeconds > 0 && sum.decades.length > 0 && <p className="muted small">{t('stats.unknownYear', { time: hoursMinutes(sum.unknownYearSeconds, t) })}</p>}
+              </section>
+            </div>
+          )}
 
           {sum.topAlbums.length > 0 && (
             <section className="card">

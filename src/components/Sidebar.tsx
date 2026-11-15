@@ -1,4 +1,4 @@
-import { BarChart3, Heart, Library, Link2, ListMusic, Pencil, Plus, Search, Settings, Trash2 } from 'lucide-react'
+import { BarChart3, Heart, Library, Link2, ListMusic, Pencil, Plus, Search, Settings, Sparkles, Trash2, Wand2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { Playlist } from '@shared/types'
 import { addToPlaylistToast } from '@renderer/lib/trackMenu'
@@ -6,6 +6,7 @@ import { useTrackDrag } from '@renderer/lib/trackDrag'
 import { useLibrary } from '@renderer/store/library'
 import { useImports } from '@renderer/store/imports'
 import { useUi } from '@renderer/store/ui'
+import { newSmart } from './SmartPlaylistDialog'
 import { Cover, IconButton } from './ui'
 import { UpdateBanner } from './UpdatePanel'
 
@@ -39,6 +40,7 @@ export function Sidebar(): React.JSX.Element {
   const askConfirm = useUi((s) => s.askConfirm)
   const openMenu = useUi((s) => s.openMenu)
   const playlists = useLibrary((s) => s.playlists)
+  const smart = useLibrary((s) => s.smartPlaylists)
   const activeJobs = useImports((s) => s.jobs.filter((j) => j.state === 'resolving' || j.state === 'downloading').length)
   const dropTarget = useTrackDrag((s) => s.over)
   const likedCount = useLibrary((s) => s.order.reduce((n, id) => n + (s.tracks[id]?.liked ? 1 : 0), 0))
@@ -98,6 +100,7 @@ export function Sidebar(): React.JSX.Element {
     { key: 'liked', icon: <Heart size={19} />, label: t('nav.liked'), view: { type: 'liked' } as const, badge: likedCount || undefined, quiet: true },
     { key: 'stats', icon: <BarChart3 size={19} />, label: t('nav.stats'), view: { type: 'stats' } as const },
     { key: 'search', icon: <Search size={19} />, label: t('nav.search'), view: { type: 'search' } as const },
+    { key: 'recommend', icon: <Sparkles size={19} />, label: t('nav.recommend'), view: { type: 'recommend' } as const },
     { key: 'import', icon: <Link2 size={19} />, label: t('nav.import'), view: { type: 'import' } as const, badge: activeJobs || undefined },
     { key: 'settings', icon: <Settings size={19} />, label: t('nav.settings'), view: { type: 'settings' } as const }
   ]
@@ -130,7 +133,7 @@ export function Sidebar(): React.JSX.Element {
         </IconButton>
       </div>
       <div className="sidebar__playlists">
-        {playlists.length === 0 && <p className="sidebar__hint">{t('nav.noPlaylists')}</p>}
+        {playlists.length === 0 && smart.length === 0 && <p className="sidebar__hint">{t('nav.noPlaylists')}</p>}
         {playlists.map((p) => (
           <button
             key={p.id}
@@ -144,6 +147,43 @@ export function Sidebar(): React.JSX.Element {
             <span className="playlist-item__text">
               <span className="playlist-item__name">{p.name}</span>
               <span className="playlist-item__meta">{t('common.tracks', { count: p.trackIds.length })}</span>
+            </span>
+          </button>
+        ))}
+        <div className="sidebar__section sidebar__section--sub">
+          <span>{t('smart.section')}</span>
+          <IconButton label={t('smart.new')} size="sm" onClick={() => useUi.getState().editSmart(newSmart())}>
+            <Plus size={17} />
+          </IconButton>
+        </div>
+        {smart.map((p) => (
+          <button
+            key={p.id}
+            type="button"
+            className={`playlist-item ${view.type === 'smart' && view.id === p.id ? 'is-active' : ''}`}
+            onClick={() => navigate({ type: 'smart', id: p.id })}
+            onContextMenu={(e) => {
+              e.preventDefault()
+              useUi.getState().openMenu(e.clientX, e.clientY, [
+                { label: t('smart.editRules'), icon: <Pencil size={16} />, onClick: () => useUi.getState().editSmart(p) },
+                {
+                  label: t('menu.delete'),
+                  icon: <Trash2 size={16} />,
+                  danger: true,
+                  onClick: () => {
+                    useLibrary.getState().deleteSmart(p.id)
+                    if (view.type === 'smart' && view.id === p.id) navigate({ type: 'library' })
+                  }
+                }
+              ])
+            }}
+          >
+            <span className="playlist-cover playlist-cover--smart">
+              <Wand2 size={18} />
+            </span>
+            <span className="playlist-item__text">
+              <span className="playlist-item__name">{p.name}</span>
+              <span className="playlist-item__meta">{t('smart.label')}</span>
             </span>
           </button>
         ))}

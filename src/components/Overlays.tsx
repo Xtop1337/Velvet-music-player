@@ -142,7 +142,25 @@ export function PromptDialog(): React.JSX.Element | null {
           submit()
         }}
       >
-        <input className="input" autoFocus value={value} placeholder={prompt.placeholder} onChange={(e) => setValue(e.target.value)} />
+        {prompt.multiline ? (
+          <textarea
+            className="input input--area"
+            autoFocus
+            rows={5}
+            value={value}
+            placeholder={prompt.placeholder}
+            onChange={(e) => setValue(e.target.value)}
+            onKeyDown={(e) => {
+              // Ctrl+Enter saves; Enter alone starts a new line
+              if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                e.preventDefault()
+                submit()
+              }
+            }}
+          />
+        ) : (
+          <input className="input" autoFocus value={value} placeholder={prompt.placeholder} onChange={(e) => setValue(e.target.value)} />
+        )}
       </form>
     </Modal>
   )

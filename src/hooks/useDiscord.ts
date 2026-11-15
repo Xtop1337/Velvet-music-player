@@ -25,6 +25,7 @@ function payload(): NowPlayingPayload | null {
     artist: track.artist,
     album: track.album,
     coverUrl: track.coverUrl,
+    coverPath: track.coverPath,
     sourceUrl: track.sourceUrl,
     duration: p.duration || track.duration,
     position: engine.currentTime,

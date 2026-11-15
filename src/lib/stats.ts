@@ -1,4 +1,5 @@
 import type { HistoryEntry, Track } from '@shared/types'
+import { decadeOf, genreFamily } from './genres'
 
 export type Period = '7d' | '30d' | '365d' | 'all'
 
@@ -33,6 +34,13 @@ export interface StatsSummary {
   topTracks: RankRow[]
   topArtists: RankRow[]
   topAlbums: RankRow[]
+  /** genre families by listening time (key = family id) */
+  genres: RankRow[]
+  /** decades by listening time (key = "1990") */
+  decades: RankRow[]
+  /** listened time without a known genre / year */
+  unknownGenreSeconds: number
+  unknownYearSeconds: number
   /** listening minutes per bucket (day, or month for long ranges) */
   buckets: { start: number; label: string; minutes: number }[]
   bucketUnit: 'day' | 'month'
@@ -55,10 +63,20 @@ export function summarize(history: HistoryEntry[], tracks: Record<string, Track>
     r.seconds += s
     map.set(key, r)
   }
+  const byGenre = new Map<string, RankRow>()
+  const byDecade = new Map<string, RankRow>()
+  let unknownGenreSeconds = 0
+  let unknownYearSeconds = 0
   for (const h of rows) {
     seconds += h.s
     const t = tracks[h.t]
     if (!t) continue
+    const family = genreFamily(t.genre)
+    if (family) add(byGenre, family, { key: family, label: family }, h.s)
+    else unknownGenreSeconds += h.s
+    const decade = decadeOf(t.year)
+    if (decade !== null) add(byDecade, String(decade), { key: String(decade), label: `${decade}` }, h.s)
+    else unknownYearSeconds += h.s
     add(byTrack, t.id, { key: t.id, label: t.title, sub: t.artist, trackId: t.id }, h.s)
     if (t.artist) add(byArtist, t.artist.toLowerCase(), { key: t.artist, label: t.artist }, h.s)
     if (t.album) add(byAlbum, `${t.album}|${t.artist}`.toLowerCase(), { key: `${t.album}|${t.artist}`, label: t.album, sub: t.artist, trackId: t.id }, h.s)
@@ -89,6 +107,10 @@ export function summarize(history: HistoryEntry[], tracks: Record<string, Track>
     topTracks: rank(byTrack, 10),
     topArtists: rank(byArtist, 8),
     topAlbums: rank(byAlbum, 6),
+    genres: [...byGenre.values()].sort((a, b) => b.seconds - a.seconds).slice(0, 8),
+    decades: [...byDecade.values()].sort((a, b) => Number(a.key) - Number(b.key)),
+    unknownGenreSeconds,
+    unknownYearSeconds,
     buckets,
     bucketUnit
   }

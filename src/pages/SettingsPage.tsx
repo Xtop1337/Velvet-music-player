@@ -1,4 +1,4 @@
-import { Check, ExternalLink, Film, FolderOpen, ImagePlus, Pause, Pipette, Play, RotateCcw, Trash2 } from 'lucide-react'
+import { Check, ExternalLink, Film, FolderOpen, ImagePlus, Pause, Pipette, Play, RotateCcw, ThumbsDown, ThumbsUp, Trash2, Volume2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { LANGUAGES, pickLanguage } from '@shared/languages'
@@ -8,12 +8,17 @@ import { HotkeySettings } from '@renderer/components/HotkeyEditor'
 import { Logo } from '@renderer/components/Sidebar'
 import { UpdateSettings } from '@renderer/components/UpdatePanel'
 import { Button, Cover, Segmented, Slider, Toggle } from '@renderer/components/ui'
+import { engine } from '@renderer/audio/engine'
+import { logUi } from '@renderer/lib/diag'
 import { formatRate, formatTime } from '@renderer/lib/format'
+import { currentTransport } from '@renderer/lib/media'
 import { trackArtist, trackTitle } from '@renderer/lib/tracks'
+import { useAnalysisProgress } from '@renderer/hooks/useAnalysis'
 import { useDiscordStatus } from '@renderer/hooks/useDiscord'
 import { useLibrary } from '@renderer/store/library'
 import { usePlayer } from '@renderer/store/player'
 import { useSettings } from '@renderer/store/settings'
+import { useTaste } from '@renderer/store/taste'
 import { useUi } from '@renderer/store/ui'
 
 const ACCENTS = ['#4f6bff', '#0ea5e9', '#14b8a6', '#22c55e', '#f59e0b', '#f97316', '#ef4444', '#ec4899', '#a855f7', '#ffffff', '#0e1526']
@@ -128,6 +133,126 @@ function DiscordPreview(): React.JSX.Element {
   )
 }
 
+/** What the recommendations have learned: 👍 and 👎, each can be taken back. */
+function RatingsSettings(): React.JSX.Element {
+  const { t } = useTranslation()
+  const likes = useTaste((st) => st.likes)
+  const dislikes = useTaste((st) => st.dislikes)
+  const askConfirm = useUi((st) => st.askConfirm)
+  const [open, setOpen] = useState<'likes' | 'dislikes' | null>(null)
+  const explicit = (list: typeof likes): typeof likes => list.filter((f) => f.weight >= 1).sort((a, b) => b.at - a.at)
+  const liked = explicit(likes)
+  const disliked = explicit(dislikes)
+  const shown = open === 'likes' ? liked : open === 'dislikes' ? disliked : []
+  return (
+    <section className="card" id="settings-ratings">
+      <h2 className="card__title">{t('settings.ratings.title')}</h2>
+      <p className="muted small">{t('settings.ratings.hint')}</p>
+      <div className="ratings-tabs">
+        <button type="button" className={`chip ${open === 'likes' ? 'is-active' : ''}`} onClick={() => setOpen(open === 'likes' ? null : 'likes')}>
+          <ThumbsUp size={14} /> {t('settings.ratings.likes', { count: liked.length })}
+        </button>
+        <button type="button" className={`chip ${open === 'dislikes' ? 'is-active' : ''}`} onClick={() => setOpen(open === 'dislikes' ? null : 'dislikes')}>
+          <ThumbsDown size={14} /> {t('settings.ratings.dislikes', { count: disliked.length })}
+        </button>
+        <div className="toolbar__spacer" />
+        {(likes.length > 0 || dislikes.length > 0) && (
+          <Button
+            variant="ghost"
+            icon={<RotateCcw size={15} />}
+            onClick={() => askConfirm({ title: t('settings.ratings.resetConfirm'), danger: true, onConfirm: () => useTaste.getState().clear('all') })}
+          >
+            {t('settings.ratings.reset')}
+          </Button>
+        )}
+      </div>
+      {open && (
+        <ul className="ratings-list">
+          {shown.length === 0 && <li className="muted small">{t('settings.ratings.empty')}</li>}
+          {shown.slice(0, 200).map((f) => (
+            <li key={f.key}>
+              <span className="ratings-list__text">
+                <strong>{f.title || f.key.split('|')[1]}</strong>
+                <small>{f.artist}</small>
+              </span>
+              <button type="button" className="link-btn" onClick={() => useTaste.getState().undo(f.key)}>
+                {t('settings.ratings.undo')}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  )
+}
+
+/** Background BPM / key detection and the online genre lookup. */
+function AnalysisSettings(): React.JSX.Element {
+  const { t } = useTranslation()
+  const a = useSettings((st) => st.settings.analysis)
+  const setSection = useSettings((st) => st.setSection)
+  const progress = useAnalysisProgress()
+  const stats = useLibrary((st) => {
+    let done = 0
+    let total = 0
+    for (const id of st.order) {
+      const tr = st.tracks[id]
+      if (!tr) continue
+      total++
+      if (tr.analyzedAt) done++
+    }
+    return `${done}/${total}`
+  })
+  const [done, total] = stats.split('/').map(Number)
+  return (
+    <section className="card" id="settings-analysis">
+      <h2 className="card__title">{t('settings.analysis.title')}</h2>
+      <Row title={t('settings.analysis.enabled')} hint={t('settings.analysis.enabledHint')}>
+        <Toggle checked={a.enabled} onChange={(v) => setSection('analysis', { enabled: v })} label={t('settings.analysis.enabled')} />
+      </Row>
+      <Row title={t('settings.analysis.lookup')} hint={t('settings.analysis.lookupHint')}>
+        <Toggle checked={a.lookupOnline} onChange={(v) => setSection('analysis', { lookupOnline: v })} label={t('settings.analysis.lookup')} />
+      </Row>
+      <p className="muted small">
+        {progress.total > 0 ? t('settings.analysis.running', { done: progress.done, total: progress.total }) : t('settings.analysis.status', { done, total })}
+      </p>
+    </section>
+  )
+}
+
+/** Plays a short chime and shows how audio is set up (for "there is no sound" reports). */
+function SoundCheck(): React.JSX.Element {
+  const { t } = useTranslation()
+  const [report, setReport] = useState('')
+  const [busy, setBusy] = useState(false)
+  const run = async (): Promise<void> => {
+    setBusy(true)
+    try {
+      const r = await engine.testTone()
+      const lines = [
+        `${t('settings.playback.check.output')}: ${r.mode === 'direct' ? t('settings.playback.check.direct') : 'Web Audio'}`,
+        `${t('settings.playback.check.transport')}: ${currentTransport() === 'loopback' ? '127.0.0.1' : 'velvet://'}`,
+        `AudioContext: ${r.context}${r.sampleRate ? ` · ${r.sampleRate} Hz` : ''}`,
+        r.problem ? `${t('settings.playback.check.problem')}: ${r.problem}` : ''
+      ].filter(Boolean)
+      setReport(lines.join('\n'))
+      logUi('info', `sound check: ${lines.join(' | ')}`)
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <Row title={t('settings.playback.check.title')} hint={report ? undefined : t('settings.playback.check.hint')}>
+      <div className="sound-check">
+        <Button icon={<Volume2 size={16} />} disabled={busy} onClick={() => void run()}>
+          {t('settings.playback.check.run')}
+        </Button>
+        {report && <pre className="sound-check__report">{report}</pre>}
+      </div>
+    </Row>
+  )
+}
+
 export function SettingsPage(): React.JSX.Element {
   const { t } = useTranslation()
   const s = useSettings((st) => st.settings)
@@ -140,6 +265,19 @@ export function SettingsPage(): React.JSX.Element {
   useEffect(() => {
     void window.velvet.app.info().then((i) => setVersion(i.version))
   }, [])
+
+  // opened for one section (e.g. "add Spotify keys"): scroll there and highlight it
+  const section = useUi((st) => (st.view.type === 'settings' ? st.view.section : undefined))
+  useEffect(() => {
+    if (!section) return
+    const el = document.getElementById(`settings-${section}`)
+    if (!el) return
+    el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    el.classList.add('is-highlighted')
+    const off = window.setTimeout(() => el.classList.remove('is-highlighted'), 1600)
+    el.querySelector<HTMLInputElement>('input:not([type=checkbox])[value=""]')?.focus({ preventScroll: true })
+    return () => clearTimeout(off)
+  }, [section])
 
   const themes: ThemeId[] = ['snow', 'midnight', 'aurora', 'system']
   const isCustomAccent = s.accent !== '' && !ACCENTS.includes(s.accent)
@@ -338,6 +476,17 @@ export function SettingsPage(): React.JSX.Element {
         <Row title={t('settings.playback.autoPitch')} hint={t('settings.playback.autoPitchHint')}>
           <Toggle checked={preservesPitch} onChange={(v) => usePlayer.getState().setPreservesPitch(v)} label={t('settings.playback.autoPitch')} />
         </Row>
+        <Row title={t('settings.playback.simpleAudio')} hint={t('settings.playback.simpleAudioHint')}>
+          <Toggle
+            checked={s.playback.simpleAudio}
+            onChange={(v) => {
+              setSection('playback', { simpleAudio: v })
+              void engine.setOutput(v ? 'direct' : 'graph', 'setting')
+            }}
+            label={t('settings.playback.simpleAudio')}
+          />
+        </Row>
+        <SoundCheck />
         {s.customPresets.length > 0 && (
           <Row title={t('settings.playback.clearPresets')}>
             <Button
@@ -363,7 +512,10 @@ export function SettingsPage(): React.JSX.Element {
 
       <HotkeySettings />
 
-      <section className="card">
+      <AnalysisSettings />
+      <RatingsSettings />
+
+      <section className="card" id="settings-discord">
         <h2 className="card__title">{t('settings.sections.discord')}</h2>
         <Row title={t('settings.discord.enable')} hint={t('settings.discord.enableHint')}>
           <span className={`status status--${status}`}>{statusText(status, user, t)}</span>
@@ -411,9 +563,12 @@ export function SettingsPage(): React.JSX.Element {
         <Row title={t('settings.discord.lookupCovers')}>
           <Toggle checked={s.discord.lookupCovers} onChange={(v) => setSection('discord', { lookupCovers: v })} label={t('settings.discord.lookupCovers')} />
         </Row>
+        <Row title={t('settings.discord.uploadCovers')} hint={t('settings.discord.uploadCoversHint')}>
+          <Toggle checked={s.discord.uploadCovers} onChange={(v) => setSection('discord', { uploadCovers: v })} label={t('settings.discord.uploadCovers')} />
+        </Row>
       </section>
 
-      <section className="card">
+      <section className="card" id="settings-import">
         <h2 className="card__title">{t('settings.sections.import')}</h2>
         <Row title={t('settings.importer.downloadDir')} hint={s.importer.downloadDir}>
           <Button

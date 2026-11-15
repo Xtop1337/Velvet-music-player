@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { LibraryData, Playlist, Track } from '@shared/types'
+import type { LibraryData, Playlist, SmartPlaylist, Track } from '@shared/types'
 import { uid } from '@renderer/lib/format'
 
 interface LibraryState {
@@ -7,10 +7,13 @@ interface LibraryState {
   /** Track ids, newest first. */
   order: string[]
   playlists: Playlist[]
+  smartPlaylists: SmartPlaylist[]
   loaded: boolean
   missing: Set<string>
   load: () => Promise<void>
   addTracks: (tracks: Track[]) => number
+  /** Songs from the internet (radio, mixes): playable, not part of the library, not saved. */
+  addStreamTracks: (tracks: Track[]) => void
   updateTrack: (id: string, patch: Partial<Track>) => void
   toggleLike: (id: string) => void
   removeTracks: (ids: string[]) => void
@@ -21,19 +24,27 @@ interface LibraryState {
   addToPlaylist: (id: string, trackIds: string[]) => number
   removeFromPlaylist: (id: string, index: number) => void
   movePlaylistTrack: (id: string, from: number, to: number) => void
+  setPlaylistNote: (id: string, note: string) => void
+  saveSmart: (pl: SmartPlaylist) => void
+  deleteSmart: (id: string) => void
 }
 
 let saveTimer: number | null = null
+/** the last change only touched songs from the internet (they are not saved) */
+let streamOnly = false
+/** when the oldest unsaved change happened (0 = all saved) */
+let pendingSince = 0
 
 function snapshot(): LibraryData {
   const s = useLibrary.getState()
-  return { version: 1, tracks: s.order.map((id) => s.tracks[id]).filter(Boolean), playlists: s.playlists }
+  return { version: 1, tracks: s.order.map((id) => s.tracks[id]).filter(Boolean), playlists: s.playlists, smartPlaylists: s.smartPlaylists }
 }
 
 export const useLibrary = create<LibraryState>((set, get) => ({
   tracks: {},
   order: [],
   playlists: [],
+  smartPlaylists: [],
   loaded: false,
   missing: new Set(),
   load: async () => {
@@ -45,7 +56,7 @@ export const useLibrary = create<LibraryState>((set, get) => ({
       tracks[t.id] = t
       order.push(t.id)
     }
-    set({ tracks, order, playlists: data?.playlists ?? [], loaded: true })
+    set({ tracks, order, playlists: data?.playlists ?? [], smartPlaylists: Array.isArray(data?.smartPlaylists) ? data!.smartPlaylists : [], loaded: true })
     const exists = await window.velvet.library.exists(order.map((id) => tracks[id].path))
     set({ missing: new Set(order.filter((_, i) => !exists[i])) })
   },
@@ -68,14 +79,29 @@ export const useLibrary = create<LibraryState>((set, get) => ({
     set({ tracks: next, order: [...fresh.reverse(), ...order], missing: nextMissing })
     return fresh.length
   },
+  addStreamTracks: (incoming) => {
+    const next = { ...get().tracks }
+    let changed = false
+    for (const t of incoming) {
+      if (next[t.id] && !next[t.id].stream) continue
+      next[t.id] = { ...next[t.id], ...t }
+      changed = true
+    }
+    if (changed) {
+      streamOnly = true
+      set({ tracks: next })
+    }
+  },
   updateTrack: (id, patch) => {
     const t = get().tracks[id]
     if (!t) return
+    streamOnly = !!t.stream
     set({ tracks: { ...get().tracks, [id]: { ...t, ...patch } } })
   },
   toggleLike: (id) => {
     const t = get().tracks[id]
     if (!t) return
+    // (songs from the internet are rated with 👍 / 👎 instead: see RateButtons)
     get().updateTrack(id, t.liked ? { liked: false, likedAt: undefined } : { liked: true, likedAt: Date.now() })
   },
   removeTracks: (ids) => {
@@ -117,6 +143,12 @@ export const useLibrary = create<LibraryState>((set, get) => ({
         p.id === id ? { ...p, trackIds: p.trackIds.filter((_, i) => i !== index) } : p
       )
     }),
+  setPlaylistNote: (id, note) => set({ playlists: get().playlists.map((p) => (p.id === id ? { ...p, note: note.trim() || undefined } : p)) }),
+  saveSmart: (pl) => {
+    const list = get().smartPlaylists
+    set({ smartPlaylists: list.some((p) => p.id === pl.id) ? list.map((p) => (p.id === pl.id ? pl : p)) : [...list, pl] })
+  },
+  deleteSmart: (id) => set({ smartPlaylists: get().smartPlaylists.filter((p) => p.id !== id) }),
   movePlaylistTrack: (id, from, to) =>
     set({
       playlists: get().playlists.map((p) => {
@@ -132,12 +164,20 @@ export const useLibrary = create<LibraryState>((set, get) => ({
 useLibrary.subscribe((state, prev) => {
   // the load itself is not a change worth writing back
   if (!state.loaded || !prev.loaded) return
-  if (state.tracks === prev.tracks && state.order === prev.order && state.playlists === prev.playlists) return
+  const onlyStreams = streamOnly && state.order === prev.order && state.playlists === prev.playlists && state.smartPlaylists === prev.smartPlaylists
+  streamOnly = false
+  if (onlyStreams) return
+  if (state.tracks === prev.tracks && state.order === prev.order && state.playlists === prev.playlists && state.smartPlaylists === prev.smartPlaylists) return
   if (saveTimer) clearTimeout(saveTimer)
+  // a steady stream of changes (the background analysis) still gets saved every 15 s
+  const now = Date.now()
+  if (!pendingSince) pendingSince = now
+  const wait = now - pendingSince > 15_000 ? 0 : 500
   saveTimer = window.setTimeout(() => {
     saveTimer = null
+    pendingSince = 0
     void window.velvet.store.save('library', snapshot())
-  }, 500)
+  }, wait)
 })
 
 window.addEventListener('velvet:flush', () => {

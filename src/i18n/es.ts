@@ -19,6 +19,7 @@ export const es: Dict = {
     liked: 'Me gusta',
     stats: 'Estadísticas',
     search: 'Buscar música',
+    recommend: 'Recomendaciones',
     library: 'Biblioteca',
     import: 'Importar por enlace',
     settings: 'Ajustes',
@@ -44,7 +45,7 @@ export const es: Dict = {
     noResults: 'No hay resultados para «{{query}}»',
     dropHere: 'Suelta para añadir música'
   },
-  columns: { title: 'Título', album: 'Álbum', duration: 'Duración', source: 'Origen' },
+  columns: { title: 'Título', album: 'Álbum', duration: 'Duración', source: 'Origen', bpm: 'BPM · tono' },
   track: {
     unknownArtist: 'Artista desconocido',
     unknownTitle: 'Sin título',
@@ -87,6 +88,7 @@ export const es: Dict = {
     text: 'El archivo del disco no se elimina.'
   },
   player: {
+    simpleAudioAuto: 'El sonido pasó al modo simple: con los efectos no se oía nada en este equipo. Puedes desactivarlo en Ajustes → Reproducción.',
     playError: 'No se pudo reproducir «{{title}}»: {{reason}}',
     mediaErrors: { 1: 'reproducción interrumpida', 2: 'no se puede leer el archivo', 3: 'el archivo está dañado o no se puede decodificar', 4: 'formato no compatible o archivo no disponible' },
     visualizer: 'Visualizador',
@@ -129,7 +131,8 @@ export const es: Dict = {
     reset: 'Restablecer',
     custom: 'Personalizado',
     bindTrack: 'Aplicar automáticamente a la canción actual',
-    bound: 'Preajuste vinculado a la canción'
+    bound: 'Velocidad {{rate}} y efectos vinculados a la canción',
+    ownSound: 'Propia: {{rate}}'
   },
   presets: {
     normal: 'Normal',
@@ -149,6 +152,8 @@ export const es: Dict = {
     remove: 'Quitar de la cola'
   },
   tags: {
+    genre: 'Género',
+    genrePlaceholder: 'p. ej. Synthwave',
     title: 'Información de la canción',
     titleField: 'Título',
     artist: 'Artista',
@@ -233,6 +238,13 @@ export const es: Dict = {
     emptyText: 'Pulsa ♥ en cualquier canción para añadirla a tus favoritas.'
   },
   stats: {
+    genres: 'Géneros',
+    decades: 'Décadas',
+    decade: 'años {{decade}}',
+    noGenres: 'Los géneros aparecen cuando las canciones los tienen: de las etiquetas o de internet (Ajustes → Análisis).',
+    noYears: 'Aún no se conocen los años de publicación.',
+    unknownGenre: 'Sin género: {{time}}',
+    unknownYear: 'Sin año: {{time}}',
     title: 'Estadísticas',
     subtitle: 'Qué has escuchado y cuánto.',
     period: 'Periodo',
@@ -271,6 +283,8 @@ export const es: Dict = {
     removeConfirm: '¿Quitar las canciones seleccionadas ({{count}}) de la biblioteca?'
   },
   sort: {
+    bpm: 'BPM (tempo)',
+    key: 'Tonalidad',
     label: 'Ordenar',
     added: 'Añadidas recientemente',
     title: 'Título',
@@ -292,6 +306,16 @@ export const es: Dict = {
     allTracks: 'Todas las canciones'
   },
   lyrics: {
+    byWords: 'Por palabras',
+    byWordsHint: 'Resalta la palabra que se canta. Desactivado: la línea se rellena de forma continua.',
+    earlier: 'Letra 0,1 s antes',
+    later: 'Letra 0,1 s después',
+    offsetHint: 'Ajuste de la letra al sonido para esta canción',
+    offsetReset: 'Restablecer el ajuste',
+    sec: 's',
+    stretch: 'Ajustar a la pista',
+    stretchHint: 'Este archivo es más largo o más corto que la grabación para la que se sincronizó la letra (slowed / sped up). Activado: los tiempos se estiran para ajustarse.',
+    stretched: 'tempo {{percent}} %',
     field: 'Letra',
     fieldHint: 'Texto normal o LRC con marcas de tiempo [mm:ss.xx] para letra sincronizada. Déjalo vacío y Velvet la buscará (LRCLIB).',
     notFound: 'No se encontró la letra de esta canción',
@@ -319,8 +343,9 @@ export const es: Dict = {
     done: 'Exportación terminada'
   },
   search: {
+    offline: 'No se puede conectar con el servicio. Comprueba tu conexión (o VPN / proxy) y pulsa Actualizar.',
     title: 'Buscar música',
-    subtitle: 'Busca en SoundCloud o YouTube, escucha un fragmento y descarga la canción a tu biblioteca con un clic.',
+    subtitle: 'Busca en SoundCloud, YouTube o Spotify, escucha un fragmento y descarga la canción a tu biblioteca en un clic.',
     placeholder: 'Título o artista',
     source: 'Dónde buscar',
     go: 'Buscar',
@@ -333,7 +358,35 @@ export const es: Dict = {
     download: 'Descargar',
     added: 'En la biblioteca',
     retry: 'Reintentar',
-    hint: 'Consejo: haz clic en una portada para escuchar la canción antes de descargarla.'
+    hint: 'Consejo: haz clic en una portada para escuchar la canción antes de descargarla.',
+    noMatch: 'No se encontró audio de esta canción en YouTube ni SoundCloud',
+    spotify: {
+      needKeys: 'Para buscar en Spotify necesitas tus propias claves de la API de Spotify',
+      badKeys: 'Spotify no aceptó las claves: revisa el Client ID y el Client Secret',
+      howTo: 'Crea una app en developer.spotify.com (Dashboard → Create app), copia su Client ID y Client Secret y pégalos en Ajustes → Importar. Las claves se quedan en tu ordenador.',
+      addKeys: 'Añadir claves',
+      fixKeys: 'Abrir claves',
+      keysNote: 'necesita tus claves de API',
+      forbidden: 'Spotify denegó el acceso (403). Desde 2026 el dueño de una app de Spotify necesita Premium y los usuarios deben añadirse a la app (Dashboard → User Management).',
+      rateLimit: 'Spotify pide esperar: demasiadas solicitudes. Inténtalo de nuevo en un minuto.'
+    }
+  },
+  recommend: {
+    inGenre: 'En tu género',
+    nearby: 'Cerca de tu gusto',
+    adding: 'Añadiendo canciones relacionadas de {{source}}…',
+    basedOn: 'Elegido para {{source}} según tu biblioteca: {{artists}} y más',
+    likeArtist: 'Parecido a {{artist}}',
+    newForYou: 'Novedades para ti',
+    title: 'Recomendaciones',
+    subtitle: 'Mi onda, mezclas del día y música nueva, a partir de toda tu biblioteca.',
+    refresh: 'Actualizar',
+    because: 'Elegido en {{source}} a partir de tus canciones: {{tracks}}',
+    loading: 'Buscando canciones en {{source}}… puede tardar hasta 20 segundos.',
+    nothing: 'No hay nada nuevo: pulsa Actualizar o prueba otro servicio.',
+    emptyTitle: 'Todavía no hay de dónde partir',
+    emptyText: 'Añade unas cuantas canciones a la biblioteca y escúchalas: aquí aparecerán recomendaciones.',
+    toSearch: 'Buscar música'
   },
   visualizer: {
     mode: 'Modo del visualizador',
@@ -395,7 +448,215 @@ export const es: Dict = {
       showWindow: 'Mostrar la ventana de Velvet'
     }
   },
+  layout: {
+    label: 'Vista',
+    list: 'Lista',
+    grid: 'Mosaico'
+  },
+  genres: {
+    funk: 'Funk',
+    phonk: 'Phonk',
+    hiphop: 'Hip hop',
+    electronic: 'Electrónica',
+    dance: 'Dance',
+    lofi: 'Lo-fi',
+    pop: 'Pop',
+    rock: 'Rock',
+    metal: 'Metal',
+    indie: 'Indie y alternativo',
+    rnb: 'R&B y soul',
+    jazz: 'Jazz y blues',
+    classical: 'Clásica',
+    ambient: 'Ambient y chill',
+    soundtrack: 'Bandas sonoras',
+    folk: 'Folk y acústica',
+    latin: 'Latina',
+    kpop: 'K-pop y J-pop',
+    other: 'Otros'
+  },
+  mixes: {
+    title: 'Mezcla del día',
+    daily: 'nuevas cada día',
+    genre: 'Mezcla: {{name}}',
+    artist: '{{artist}} y parecidos',
+    moods: {
+      energetic: 'Energía',
+      calm: 'Calma',
+      melancholic: 'Melancolía'
+    },
+    eyebrow: 'Mezcla del día',
+    text: 'Tus canciones y algunas nuevas. Con {{artists}}',
+    renews: 'se renueva mañana',
+    addingNew: 'añadiendo canciones nuevas…',
+    gone: 'Las canciones de esta mezcla ya no están en tu biblioteca: mañana habrá una nueva.'
+  },
+  forgotten: {
+    title: 'Canciones olvidadas',
+    sub_one: '{{count}} canción favorita',
+    sub_few: '{{count}} canciones favoritas',
+    sub_many: '{{count}} canciones favoritas',
+    sub_other: '{{count}} canciones favoritas',
+    eyebrow: 'Selección',
+    text: 'Favoritas y canciones muy escuchadas que no oyes desde hace más de seis semanas.',
+    none: 'Nada que redescubrir todavía: todas tus favoritas sonaron hace poco.'
+  },
+  radio: {
+    mode: 'Modo de la onda',
+    source: 'Canciones nuevas de',
+    sourceAuto: 'Auto ({{name}})',
+    modes: {
+      favorite: 'Favoritos',
+      balance: 'Equilibrio',
+      discover: 'Descubrir'
+    },
+    modeText: {
+      favorite: 'Tu género principal y los más cercanos: más favoritas, y canciones nuevas solo del mismo estilo.',
+      balance: 'Mitad tuyo y mitad nuevo: tu género y los cercanos.',
+      discover: 'Sobre todo novedades: artistas desconocidos y géneros cercanos.'
+    },
+    wave: 'Mi onda',
+    waveText: 'Un flujo sin fin a tu gusto: canciones nuevas de artistas parecidos mezcladas con tus favoritas. Aprende de «No me interesa» y de los saltos.',
+    listen: 'Escuchar',
+    badge: 'Radio',
+    fromTrack: 'Radio de esta canción',
+    empty: 'No se encontraron canciones para la radio',
+    offline: 'No se puede acceder al catálogo: la radio usa tu biblioteca'
+  },
+  taste: {
+    like: 'Me gusta',
+    liked: 'Entendido: sugeriremos más cosas así',
+    notInterested: 'No me interesa',
+    noted: 'Entendido: sugeriremos menos cosas así'
+  },
+  stream: {
+    download: 'Descargar a la biblioteca',
+    connecting: 'Conectando con la canción…'
+  },
+  notes: {
+    add: 'Añadir nota',
+    edit: 'Editar nota',
+    label: 'Nota',
+    placeholder: 'Tus ideas, dónde la oíste, qué te recuerda…',
+    trackTitle: 'Nota: {{name}}',
+    playlistTitle: 'Nota de «{{name}}»'
+  },
+  smart: {
+    section: 'Listas inteligentes',
+    label: 'Lista inteligente',
+    new: 'Nueva lista inteligente',
+    edit: 'Reglas de la lista',
+    editRules: 'Reglas',
+    name: 'Nombre',
+    untitled: 'Lista inteligente',
+    matchLabel: 'Canciones que cumplen',
+    matchAll: 'todas las reglas',
+    matchAny: 'alguna regla',
+    addRule: 'Añadir regla',
+    removeRule: 'Quitar regla',
+    field: 'Campo',
+    op: 'Condición',
+    value: 'Valor',
+    yes: 'sí',
+    no: 'no',
+    days: 'días',
+    or: 'o',
+    sort: 'Orden',
+    direction: 'Dirección',
+    desc: 'descendente',
+    asc: 'ascendente',
+    limit: 'Como máximo',
+    limitHint: 'vacío: sin límite',
+    matches_one: 'Coincide {{count}} canción',
+    matches_few: 'Coinciden {{count}} canciones',
+    matches_many: 'Coinciden {{count}} canciones',
+    matches_other: 'Coinciden {{count}} canciones',
+    empty: 'Todavía nada cumple las reglas.',
+    noRules: 'Sin reglas: toda la biblioteca',
+    deleteTitle: '¿Eliminar la lista inteligente «{{name}}»?',
+    fields: {
+      plays: 'Reproducciones totales',
+      playsRecent: 'Reproducciones en 30 días',
+      liked: 'En favoritos',
+      addedDays: 'Añadida',
+      notPlayedDays: 'Sin escuchar',
+      genre: 'Género',
+      artist: 'Artista',
+      album: 'Álbum',
+      title: 'Título',
+      year: 'Año',
+      bpm: 'BPM',
+      key: 'Tonalidad',
+      mode: 'Modo (major / minor)',
+      duration: 'Duración, min',
+      source: 'Origen',
+      hasNote: 'Tiene nota'
+    },
+    ops: {
+      gte: '≥',
+      lte: '≤',
+      eq: '=',
+      neq: '≠',
+      contains: 'contiene',
+      notContains: 'no contiene',
+      is: 'sí',
+      isNot: 'no'
+    },
+    daysOps: {
+      lte: 'en los últimos',
+      gte: 'hace más de'
+    },
+    placeholders: {
+      genre: 'Rock',
+      artist: 'Nombre',
+      key: 'A minor u 8A',
+      mode: 'minor',
+      source: 'local, youtube, soundcloud, spotify',
+      year: '2010'
+    },
+    sorts: {
+      added: 'Fecha de añadido',
+      plays: 'Reproducciones',
+      lastPlayed: 'Última escucha',
+      title: 'Título',
+      artist: 'Artista',
+      bpm: 'BPM',
+      random: 'Aleatorio (nuevo cada día)'
+    },
+    templates: {
+      oftenNotLiked: 'Muy escuchadas, sin favorito',
+      addedWeek: 'Añadidas esta semana',
+      forgottenLoved: 'Favoritas olvidadas',
+      fast: 'Rápidas (BPM ≥ 125)',
+      calm: 'Tranquilas (BPM ≤ 95)',
+      decade: 'Hace veinte años'
+    }
+  },
   settings: {
+    ratings: {
+      title: 'Recomendaciones: tus valoraciones',
+      hint: '👍 y 👎 enseñan a Mi onda, a las mezclas y a «Novedades para ti». Puedes deshacer una valoración.',
+      likes_one: 'Me gusta: {{count}}',
+      likes_few: 'Me gusta: {{count}}',
+      likes_many: 'Me gusta: {{count}}',
+      likes_other: 'Me gusta: {{count}}',
+      dislikes_one: 'No me interesa: {{count}}',
+      dislikes_few: 'No me interesa: {{count}}',
+      dislikes_many: 'No me interesa: {{count}}',
+      dislikes_other: 'No me interesa: {{count}}',
+      empty: 'Aún no hay nada',
+      undo: 'Deshacer',
+      reset: 'Restablecer todo',
+      resetConfirm: '¿Eliminar todas las valoraciones? Las recomendaciones volverán a aprender desde cero.'
+    },
+    analysis: {
+      title: 'Análisis de canciones',
+      enabled: 'Detectar BPM, tonalidad y energía',
+      enabledHint: 'Velvet analiza tus canciones en segundo plano, una a una, sin molestar la reproducción. Sirve para ordenar por BPM y tonalidad, mezclas por ánimo y la radio.',
+      lookup: 'Buscar género y año en internet',
+      lookupHint: 'Para canciones sin género o año en sus etiquetas, desde el catálogo público de Deezer (solo se envían artista y título).',
+      running: 'Analizando: {{done}} de {{total}}…',
+      status: '{{done}} de {{total}} canciones analizadas'
+    },
     title: 'Ajustes',
     sections: {
       appearance: 'Apariencia',
@@ -442,6 +703,17 @@ export const es: Dict = {
       autoHint: 'Como el sistema — ahora {{language}}'
     },
     playback: {
+      simpleAudio: 'Modo de sonido simple',
+      simpleAudioHint: 'Si no hay ningún sonido, actívalo: el audio suena directamente, sin Web Audio. Los efectos, el ecualizador y el volumen por encima del 100 % no funcionan en este modo.',
+      check: {
+        title: 'Prueba de sonido',
+        hint: 'Reproduce un tono corto y muestra cómo está configurada la salida. Si no lo oyes, envía el archivo velvet.log.',
+        run: 'Probar sonido',
+        output: 'Salida',
+        transport: 'Archivos a través de',
+        direct: 'modo simple',
+        problem: 'Último error'
+      },
       crossfade: 'Fundido',
       crossfadeHint: 'Transición suave: la siguiente canción empieza mientras la actual se desvanece.',
       crossfadeOff: 'No',
@@ -484,6 +756,8 @@ export const es: Dict = {
       showSpeed: 'Mostrar la velocidad (p. ej., «· 0.8x»)',
       showButtons: 'Botón «Abrir en SoundCloud / Spotify»',
       lookupCovers: 'Buscar portadas en internet para canciones locales',
+      uploadCovers: 'Mostrar la portada propia de la canción',
+      uploadCoversHint: 'Si no se encuentra una portada en internet pero la canción tiene la suya, Velvet sube una copia pequeña (512 px) a catbox.moe: Discord solo muestra imágenes por enlace. El enlace es público; cada portada se sube una sola vez. Sin portada, el logo de Velvet.',
       hideWhenPaused: 'Ocultar la actividad en pausa',
       hideWhenPausedHint: 'Si está desactivado, Discord muestra «⏸ En pausa» y el tiempo se detiene.',
       preview: 'Vista previa',
@@ -500,7 +774,7 @@ export const es: Dict = {
       },
       createPlaylist: 'Crear una lista al importar un álbum o una lista',
       spotifyApi: 'Spotify Web API (opcional)',
-      spotifyApiHint: 'Sin claves, Velvet lee la página pública de Spotify (hasta ~100 canciones por lista). Con claves obtienes listas completas y álbumes exactos. Crea las claves en developer.spotify.com.',
+      spotifyApiHint: 'Sin claves, Velvet lee la página pública de Spotify (hasta ~100 canciones por lista). Con claves obtienes listas completas y álbumes exactos. Crea las claves en developer.spotify.com. Las claves también hacen falta para buscar y recibir recomendaciones de Spotify.',
       clientId: 'Client ID',
       clientSecret: 'Client Secret'
     },

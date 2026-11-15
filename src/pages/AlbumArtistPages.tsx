@@ -2,7 +2,8 @@ import { Disc3, Mic2, Play, Shuffle } from 'lucide-react'
 import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { AlbumGrid } from '@renderer/components/CardGrid'
-import { TrackList } from '@renderer/components/TrackList'
+import { LayoutToggle, useLayout, type Layout } from '@renderer/components/LayoutToggle'
+import { TrackView } from '@renderer/components/TrackGrid'
 import { Button, Cover } from '@renderer/components/ui'
 import { formatTime } from '@renderer/lib/format'
 import { byTrackNo, groupAlbums, splitArtists, tracksOfArtist } from '@renderer/lib/group'
@@ -11,7 +12,7 @@ import { useLibrary } from '@renderer/store/library'
 import { usePlayer } from '@renderer/store/player'
 import { useUi } from '@renderer/store/ui'
 
-function PlayButtons({ ids }: { ids: string[] }): React.JSX.Element {
+function PlayButtons({ ids, layout, onLayout }: { ids: string[]; layout: Layout; onLayout: (l: Layout) => void }): React.JSX.Element {
   const { t } = useTranslation()
   return (
     <div className="playlist-hero__actions no-drag">
@@ -29,12 +30,15 @@ function PlayButtons({ ids }: { ids: string[] }): React.JSX.Element {
       >
         {t('library.shuffle')}
       </Button>
+      <div className="toolbar__spacer" />
+      <LayoutToggle value={layout} onChange={onLayout} />
     </div>
   )
 }
 
 export function AlbumPage({ album, artist }: { album: string; artist: string }): React.JSX.Element {
   const { t } = useTranslation()
+  const [layout, setLayout] = useLayout('album')
   const order = useLibrary((s) => s.order)
   const tracks = useLibrary((s) => s.tracks)
   const navigate = useUi((s) => s.navigate)
@@ -62,16 +66,17 @@ export function AlbumPage({ album, artist }: { album: string; artist: string }):
             </button>
             {group?.year ? ` · ${group.year}` : ''} · {t('common.tracks', { count: ids.length })} · {formatTime(totalDuration(ids.map((id) => tracks[id])))}
           </p>
-          <PlayButtons ids={ids} />
+          <PlayButtons ids={ids} layout={layout} onLayout={setLayout} />
         </div>
       </header>
-      <TrackList ids={ids} />
+      <TrackView ids={ids} layout={layout} />
     </div>
   )
 }
 
 export function ArtistPage({ artist }: { artist: string }): React.JSX.Element {
   const { t } = useTranslation()
+  const [layout, setLayout] = useLayout('album')
   const order = useLibrary((s) => s.order)
   const tracks = useLibrary((s) => s.tracks)
   const ids = useMemo(() => tracksOfArtist(artist, order, tracks), [artist, order, tracks])
@@ -97,13 +102,13 @@ export function ArtistPage({ artist }: { artist: string }): React.JSX.Element {
             {t('common.tracks', { count: ids.length })}
             {albums.length > 0 && ` · ${t('artist.albums', { count: albums.length })}`}
           </p>
-          <PlayButtons ids={ids} />
+          <PlayButtons ids={ids} layout={layout} onLayout={setLayout} />
         </div>
       </header>
       {ids.length > 5 && ids.some((id) => tracks[id].playCount) && (
         <>
           <h3 className="section-title">{t('artist.popular')}</h3>
-          <TrackList ids={popular} />
+          <TrackView ids={popular} layout={layout} />
         </>
       )}
       {albums.length > 0 && (
@@ -113,7 +118,7 @@ export function ArtistPage({ artist }: { artist: string }): React.JSX.Element {
         </>
       )}
       <h3 className="section-title">{t('artist.allTracks')}</h3>
-      <TrackList ids={ids} />
+      <TrackView ids={ids} layout={layout} />
     </div>
   )
 }

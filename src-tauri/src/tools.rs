@@ -197,6 +197,12 @@ fn ytdlp_asset() -> &'static str {
 
 static YTDLP: Mutex<Option<YtDlpStatus>> = Mutex::new(None);
 
+/// Forgets which yt-dlp was found (tests point VELVET_DATA_DIR at a folder with their own).
+#[cfg(test)]
+pub fn forget_ytdlp() {
+    *YTDLP.lock().unwrap() = None;
+}
+
 pub async fn ytdlp_status(force: bool) -> YtDlpStatus {
     if !force {
         if let Some(s) = YTDLP.lock().unwrap().clone() {

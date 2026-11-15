@@ -10,9 +10,11 @@ import { QueuePanel } from './components/QueuePanel'
 import { Sidebar } from './components/Sidebar'
 import { TagEditor } from './components/TagEditor'
 import { ExportDialog } from './components/ExportDialog'
+import { SmartPlaylistDialog } from './components/SmartPlaylistDialog'
 import { WindowControls } from './components/WindowControls'
 import { UpdateDialog } from './components/UpdatePanel'
 import { useDiscordSync } from './hooks/useDiscord'
+import { useAnalysis } from './hooks/useAnalysis'
 import { useMediaSession } from './hooks/useMediaSession'
 import { useRemote } from './hooks/useRemote'
 import { useUpdates } from './hooks/useUpdates'
@@ -27,8 +29,14 @@ import { SettingsPage } from './pages/SettingsPage'
 import { AlbumPage, ArtistPage } from './pages/AlbumArtistPages'
 import { LikedPage } from './pages/LikedPage'
 import { StatsPage } from './pages/StatsPage'
+import { MixPage } from './pages/MixPage'
+import { RecommendPage } from './pages/RecommendPage'
+import { SmartPlaylistPage } from './pages/SmartPlaylistPage'
 import { SearchPage } from './pages/SearchPage'
+import { rememberedSource } from './components/SourcePicker'
+import { prefetchRecs } from './store/recs'
 import { useStats } from './store/stats'
+import { useTaste } from './store/taste'
 import { bindImportEvents } from './store/imports'
 import { useLibrary } from './store/library'
 import { usePlayer } from './store/player'
@@ -77,10 +85,14 @@ export function App(): React.JSX.Element {
       .load()
       .then(() => usePlayer.getState().init(useSettings.getState().settings.playback))
     void useStats.getState().load()
+    void useTaste.getState().load()
     void useLibrary
       .getState()
       .load()
-      .then(() => usePlayer.getState().restore())
+      .then(() => {
+        void usePlayer.getState().restore()
+        prefetchRecs(rememberedSource('velvet.recommendSource'))
+      })
     return bindImportEvents((job) => {
       const ui = useUi.getState()
       if (job.state === 'done') ui.toast(t('import.finished', { title: job.title ?? job.url }), 'success')
@@ -113,6 +125,7 @@ export function App(): React.JSX.Element {
   useTheme()
   useDiscordSync()
   useMediaSession()
+  useAnalysis()
   useShortcuts()
   useRemote()
   useUpdates()
@@ -133,6 +146,9 @@ export function App(): React.JSX.Element {
         {view.type === 'liked' && <LikedPage />}
         {view.type === 'stats' && <StatsPage />}
         {view.type === 'search' && <SearchPage />}
+        {view.type === 'recommend' && <RecommendPage />}
+        {view.type === 'mix' && <MixPage key={view.id} id={view.id} />}
+        {view.type === 'smart' && <SmartPlaylistPage key={view.id} id={view.id} />}
         {view.type === 'album' && <AlbumPage key={view.album} album={view.album} artist={view.artist} />}
         {view.type === 'artist' && <ArtistPage key={view.artist} artist={view.artist} />}
       </main>
@@ -141,6 +157,7 @@ export function App(): React.JSX.Element {
       <NowPlaying />
       <TagEditor />
       <ExportDialog />
+      <SmartPlaylistDialog />
       <PromptDialog />
       <ConfirmDialog />
       <UpdateDialog />

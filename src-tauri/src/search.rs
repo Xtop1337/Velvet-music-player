@@ -1,8 +1,11 @@
-//! Searching SoundCloud / YouTube through yt-dlp, and preview streams.
+//! Searching SoundCloud / YouTube (through yt-dlp) and Spotify (Web API with the user's keys),
+//! and preview streams.
 
 use crate::matcher::split_artist_title;
+use crate::spotify::{self, SpotifyItem, SpotifyKeys};
 use crate::tools::{require_ytdlp, ytdlp_json};
 use crate::types::SearchResult;
+use serde::Deserialize;
 use serde_json::Value;
 use std::time::Duration;
 
@@ -46,6 +49,11 @@ pub fn to_results(entries: &[Value], source: &str) -> Vec<SearchResult> {
                 url: url.to_string(),
                 thumbnail: best_thumb(e),
                 source: source.to_string(),
+                genre: s(e, "genre")
+                    .or_else(|| e.get("genres").and_then(Value::as_array).and_then(|g| g.first()).and_then(Value::as_str))
+                    .filter(|g| !g.trim().is_empty())
+                    .map(String::from),
+                ..Default::default()
             })
         })
         .collect()
@@ -55,10 +63,13 @@ fn entries(v: &Value) -> Vec<Value> {
     v.get("entries").and_then(Value::as_array).cloned().unwrap_or_default()
 }
 
-pub async fn search(query: &str, source: &str, limit: u32) -> Result<Vec<SearchResult>, String> {
+pub async fn search(query: &str, source: &str, limit: u32, keys: &SpotifyKeys) -> Result<Vec<SearchResult>, String> {
     let q = query.trim();
     if q.is_empty() {
         return Ok(Vec::new());
+    }
+    if source == "spotify" {
+        return spotify::search(q, limit as usize, keys).await;
     }
     let bin = require_ytdlp().await?;
     let prefix = if source == "soundcloud" { "scsearch" } else { "ytsearch" };
@@ -76,6 +87,38 @@ pub async fn search(query: &str, source: &str, limit: u32) -> Result<Vec<SearchR
         results = to_results(&entries(&full), source);
     }
     Ok(results)
+}
+
+/// What the UI knows about a result it wants to hear.
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct PreviewRequest {
+    pub url: String,
+    pub title: String,
+    pub artist: String,
+    pub duration: f64,
+}
+
+pub fn is_spotify(url: &str) -> bool {
+    url.starts_with("https://open.spotify.com/")
+}
+
+/// Spotify itself can't be streamed (DRM): the same audio the importer would download is found
+/// on YouTube / SoundCloud and played from there.
+pub async fn preview(r: &PreviewRequest) -> Result<String, String> {
+    if !is_spotify(&r.url) {
+        return preview_url(&r.url).await;
+    }
+    let bin = require_ytdlp().await?;
+    let item = SpotifyItem {
+        title: r.title.clone(),
+        artists: r.artist.split(", ").map(str::trim).filter(|a| !a.is_empty()).map(String::from).collect(),
+        duration_ms: r.duration * 1000.0,
+        url: r.url.clone(),
+        ..Default::default()
+    };
+    let found = crate::importer::find_audio(&bin, &item, false).await.ok_or_else(|| "no-match".to_string())?;
+    preview_url(&found.url).await
 }
 
 /// Direct audio stream URL for previewing a result before downloading it.
@@ -122,7 +165,8 @@ mod tests {
                 duration: 129.0,
                 url: "https://www.youtube.com/watch?v=abc".into(),
                 thumbnail: Some("mid".into()),
-                source: "youtube".into()
+                source: "youtube".into(),
+                ..Default::default()
             }]
         );
     }

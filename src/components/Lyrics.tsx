@@ -1,9 +1,10 @@
-import { Loader2, RefreshCw } from 'lucide-react'
+import { Loader2, Minus, Plus, RefreshCw } from 'lucide-react'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { activeLine, estimateTimes, lineProgress, parseLrc } from '@shared/lrc'
+import { activeLine, estimateTimes, isSpeedVersion, lineProgress, parseLrc, scaleLines, singingPace, stretchFactor, wordTimings, type TimedWord } from '@shared/lrc'
 import type { LyricsResult, Track } from '@shared/types'
 import { engine } from '@renderer/audio/engine'
+import { useLibrary } from '@renderer/store/library'
 import { usePlayer } from '@renderer/store/player'
 
 const memo = new Map<string, LyricsResult>()
@@ -44,51 +45,104 @@ export function useLyrics(track: Track | undefined): { result: LyricsResult | nu
 /** How many lines around the current one stay visible. */
 const BEFORE = 1
 const AFTER = 3
+const WORDS_KEY = 'velvet.lyricsWords'
+
+function rememberedWords(): boolean {
+  try {
+    return localStorage.getItem(WORDS_KEY) !== 'off'
+  } catch {
+    return true
+  }
+}
 
 /**
- * Apple-Music-style lyrics: only a few lines around the current one are shown,
- * the column glides to the active line and the line fills in as it is sung.
- * Unsynced lyrics get estimated timings so they scroll with the song too.
+ * Apple-Music-style lyrics: only a few lines around the current one are shown, the column glides
+ * to the active line, and the line lights up as it is sung — word by word ("By words", on by
+ * default) or as one smooth fill. The highlight follows what is *heard* (the audio output's
+ * latency is taken into account), lyrics of slowed / sped-up versions are stretched to the file,
+ * and a manual shift is kept per track. Unsynced lyrics get estimated timings so they scroll too.
  */
 export function Lyrics({ track }: { track: Track }): React.JSX.Element {
   const { t } = useTranslation()
   const { result, loading, reload } = useLyrics(track)
   const duration = usePlayer((s) => s.duration) || track.duration
+  const [byWords, setByWords] = useState(rememberedWords)
+  const offset = track.lyricsOffset ?? 0
   const parsed = useMemo(() => parseLrc(result?.synced || result?.plain || ''), [result])
-  const lines = useMemo(() => (parsed.synced ? parsed.lines : estimateTimes(parsed.lines, duration)), [parsed, duration])
+  // a slowed / sped-up file of a song timed at its original speed: stretch the timestamps to fit
+  const speedVersion = isSpeedVersion(`${track.title} ${track.album}`)
+  const stretchOn = track.lyricsStretch ?? speedVersion
+  const lengthsDiffer = !!result?.duration && duration > 0 && Math.abs(duration / result.duration - 1) > 0.02
+  const stretch = parsed.synced ? stretchFactor(duration, result?.duration, stretchOn) : 1
+  const lines = useMemo(
+    () => (parsed.synced ? scaleLines(parsed.lines, stretch) : estimateTimes(parsed.lines, duration)),
+    [parsed, duration, stretch]
+  )
+  const pace = useMemo(() => (parsed.synced ? singingPace(lines) : 0), [parsed.synced, lines])
+  const words = useMemo(() => (parsed.synced && byWords ? lines.map((_, i) => wordTimings(lines, i, duration, pace)) : null), [parsed.synced, byWords, lines, duration, pace])
   const playing = usePlayer((s) => s.playing)
   const [active, setActive] = useState(-1)
   const box = useRef<HTMLDivElement>(null)
   const column = useRef<HTMLDivElement>(null)
 
-  // follow the playback position; the fill of the active line is written straight to the DOM
+  // lyrics cached before the original's length was kept: look a slowed version up once more
+  const refetched = useRef('')
+  useEffect(() => {
+    if (speedVersion && result?.source === 'lrclib' && result.synced && result.duration === undefined && refetched.current !== track.id) {
+      refetched.current = track.id
+      reload()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [result, speedVersion, track.id])
+
+  // follow the playback position; the fill is written straight to the DOM
   useEffect(() => {
     if (!lines.length) return
     let raf = 0
     let last = -2
-    if (!playing) {
-      // paused: place the highlight once instead of running a loop
-      const i = activeLine(lines, engine.currentTime + 0.15)
-      setActive(i)
+    let spans: HTMLElement[] = []
+    const paint = (): number => {
+      const time = engine.heardTime - offset
+      const i = activeLine(lines, time)
+      const lineChanged = i !== last
+      if (lineChanged) {
+        last = i
+        setActive(i)
+        spans = []
+      }
       const el = column.current?.querySelector<HTMLElement>(`[data-line="${i}"]`)
-      el?.style.setProperty('--fill', `${(lineProgress(lines, i, engine.currentTime + 0.15, duration) * 100).toFixed(1)}%`)
-      return
+      if (!el) return i
+      const timed: TimedWord[] | undefined = words?.[i]
+      if (timed?.length) {
+        // React renders the word spans right after the line becomes active
+        if (!spans.length) spans = [...el.querySelectorAll<HTMLElement>('.lyrics__word')]
+        for (let k = 0; k < spans.length && k < timed.length; k++) {
+          const w = timed[k]
+          const fill = time >= w.end ? 100 : time <= w.start ? 0 : ((time - w.start) / (w.end - w.start)) * 100
+          const v = `${fill.toFixed(0)}%`
+          if (spans[k].dataset.fill !== v) {
+            spans[k].dataset.fill = v
+            spans[k].style.setProperty('--fill', v)
+          }
+        }
+      } else {
+        el.style.setProperty('--fill', `${(lineProgress(lines, i, time, duration, pace || undefined) * 100).toFixed(1)}%`)
+      }
+      return i
+    }
+    if (!playing) {
+      // paused: place the highlight once instead of running a loop (twice: the spans render after the line is set)
+      paint()
+      const again = window.setTimeout(paint, 60)
+      return () => clearTimeout(again)
     }
     const tick = (): void => {
       raf = requestAnimationFrame(tick)
-      // a tiny lead so the highlight lands with the voice, not after it
-      const time = engine.currentTime + 0.15
-      const i = activeLine(lines, time)
-      if (i !== last) {
-        last = i
-        setActive(i)
-      }
-      const el = column.current?.querySelector<HTMLElement>(`[data-line="${i}"]`)
-      if (el) el.style.setProperty('--fill', `${(lineProgress(lines, i, time, duration) * 100).toFixed(1)}%`)
+      paint()
     }
     raf = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(raf)
-  }, [lines, duration, playing])
+  }, [lines, duration, playing, words, pace, offset])
 
   // glide the column so the active line sits a third of the way down
   useLayoutEffect(() => {
@@ -99,7 +153,7 @@ export function Lyrics({ track }: { track: Track }): React.JSX.Element {
     if (!el) return
     const y = el.offsetTop - b.clientHeight * 0.32 + el.offsetHeight / 2
     col.style.transform = `translateY(${-Math.max(0, y)}px)`
-  }, [active, lines])
+  }, [active, lines, byWords])
 
   if (loading) {
     return (
@@ -120,14 +174,29 @@ export function Lyrics({ track }: { track: Track }): React.JSX.Element {
     )
   }
 
+  const shift = (d: number): void => {
+    const next = Math.round((offset + d) * 10) / 10
+    useLibrary.getState().updateTrack(track.id, { lyricsOffset: Math.abs(next) < 0.05 ? undefined : Math.max(-15, Math.min(15, next)) })
+  }
+  const toggleWords = (): void => {
+    const on = !byWords
+    setByWords(on)
+    try {
+      localStorage.setItem(WORDS_KEY, on ? 'on' : 'off')
+    } catch {
+      // a convenience only
+    }
+  }
+
   return (
     <div className="lyrics-wrap">
-      <div className={`lyrics ${parsed.synced ? 'is-synced' : 'is-estimated'}`} ref={box}>
+      <div className={`lyrics ${parsed.synced ? 'is-synced' : 'is-estimated'} ${words ? 'is-words' : ''}`} ref={box}>
         <div className="lyrics__column" ref={column}>
           {lines.map((l, i) => {
             const d = i - Math.max(0, active)
             const visible = d >= -BEFORE && d <= AFTER
             const blank = !l.text.trim()
+            const timed = i === active ? words?.[i] : undefined
             return (
               <button
                 key={i}
@@ -139,13 +208,22 @@ export function Lyrics({ track }: { track: Track }): React.JSX.Element {
                   ['--d' as string]: Math.abs(d),
                   opacity: !visible ? 0 : i === active ? 1 : d < 0 ? 0.32 : Math.max(0.18, 0.62 - (d - 1) * 0.16)
                 }}
-                onClick={() => usePlayer.getState().seek(l.time ?? 0)}
+                onClick={() => usePlayer.getState().seek(Math.max(0, (l.time ?? 0) + offset))}
               >
                 {blank ? (
                   <span className="lyrics__dots" aria-label="♪">
                     <i />
                     <i />
                     <i />
+                  </span>
+                ) : timed?.length ? (
+                  // the active line, word by word
+                  <span className="lyrics__words">
+                    {timed.map((w, k) => (
+                      <span key={k} className="lyrics__word">
+                        {w.text}{' '}
+                      </span>
+                    ))}
                   </span>
                 ) : (
                   <span className="lyrics__text" data-text={l.text}>
@@ -161,12 +239,45 @@ export function Lyrics({ track }: { track: Track }): React.JSX.Element {
         <span>
           {t(`lyrics.source.${result?.source ?? 'none'}`)}
           {!parsed.synced && ` · ${t('lyrics.estimated')}`}
+          {stretch !== 1 && ` · ${t('lyrics.stretched', { percent: Math.round(stretch * 100) })}`}
         </span>
-        {result?.source !== 'user' && (
-          <button type="button" className="link-btn" onClick={reload} title={t('lyrics.findAgain')}>
-            <RefreshCw size={12} /> {t('lyrics.findAgain')}
-          </button>
-        )}
+        <span className="lyrics__tools">
+          {parsed.synced && (
+            <>
+              <button type="button" className={`lyrics__chip ${byWords ? 'is-on' : ''}`} aria-pressed={byWords} onClick={toggleWords} title={t('lyrics.byWordsHint')}>
+                {t('lyrics.byWords')}
+              </button>
+              {lengthsDiffer && (
+                <button
+                  type="button"
+                  className={`lyrics__chip ${stretch !== 1 ? 'is-on' : ''}`}
+                  aria-pressed={stretch !== 1}
+                  title={t('lyrics.stretchHint')}
+                  onClick={() => useLibrary.getState().updateTrack(track.id, { lyricsStretch: !stretchOn })}
+                >
+                  {t('lyrics.stretch')}
+                </button>
+              )}
+              <span className="lyrics__offset" title={t('lyrics.offsetHint')}>
+                <button type="button" className="icon-btn icon-btn--sm" aria-label={t('lyrics.earlier')} title={t('lyrics.earlier')} onClick={() => shift(-0.1)}>
+                  <Minus size={13} />
+                </button>
+                <button type="button" className="lyrics__offset-value" onClick={() => shift(-offset)} title={t('lyrics.offsetReset')}>
+                  {offset > 0 ? '+' : ''}
+                  {offset.toFixed(1)} {t('lyrics.sec')}
+                </button>
+                <button type="button" className="icon-btn icon-btn--sm" aria-label={t('lyrics.later')} title={t('lyrics.later')} onClick={() => shift(0.1)}>
+                  <Plus size={13} />
+                </button>
+              </span>
+            </>
+          )}
+          {result?.source !== 'user' && (
+            <button type="button" className="link-btn" onClick={reload} title={t('lyrics.findAgain')}>
+              <RefreshCw size={12} /> {t('lyrics.findAgain')}
+            </button>
+          )}
+        </span>
       </div>
     </div>
   )

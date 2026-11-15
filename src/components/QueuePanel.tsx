@@ -33,7 +33,7 @@ export function QueuePanel(): React.JSX.Element | null {
           <>
             <h4>{t('queue.nowPlaying')}</h4>
             <div className="queue-item is-current">
-              <Cover path={current.coverPath} seed={current.id} size={40} rounded={8} />
+              <Cover path={current.coverPath} url={current.coverUrl} seed={current.id} size={40} rounded={8} />
               <div className="queue-item__text">
                 <span>{trackTitle(current, t)}</span>
                 <small>{trackArtist(current, t)}</small>
@@ -50,7 +50,7 @@ export function QueuePanel(): React.JSX.Element | null {
           return (
             <div key={`${id}-${i}`} className="queue-item" onDoubleClick={() => void usePlayer.getState().jumpTo(i)}>
               <button type="button" className="queue-item__hit" onClick={() => void usePlayer.getState().jumpTo(i)}>
-                <Cover path={tr.coverPath} seed={tr.id} size={40} rounded={8} />
+                <Cover path={tr.coverPath} url={tr.coverUrl} seed={tr.id} size={40} rounded={8} />
                 <div className="queue-item__text">
                   <span>{trackTitle(tr, t)}</span>
                   <small>
