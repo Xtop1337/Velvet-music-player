@@ -123,19 +123,6 @@ and every 6 hours (can be turned off or checked manually in "Settings → About"
 the installed one is out, an "Update available" window appears with the version number and changelog; the "Update" button
 opens the release page, where you can download the new installer. A reminder stays in the sidebar until you update.
 
-How to publish a new version:
-
-1. Bump the version number (e.g. `3.0.1`) in three places: `package.json`, `src-tauri/Cargo.toml`,
-   `src-tauri/tauri.conf.json`. The `package-lock.json` and `src-tauri/Cargo.lock` files update themselves on
-   `npm install` and build.
-2. Add the changes to `CHANGELOG.md` and build the installer: `npm run dist:win`.
-3. On GitHub: *Releases → Draft a new release*, tag `v3.0.1` (the `v` prefix is optional), describe
-   what's new in the description, attach `src-tauri/target/release/bundle/nsis/Velvet_3.0.1_x64-setup.exe` and click
-   *Publish release*. Drafts and pre-releases are ignored.
-
-The "Update available" window shows the first 600 characters of the release description, so put the most important
-things at the beginning.
-
 The repository address is set in `src-tauri/src/updater.rs` (the `REPO` constant).
 
 ## Spotify with and without keys
