@@ -3,7 +3,7 @@
 </p>
 
 # Velvet — music player
-
+![Popup](assets/discord/picture.JPG)
 **Version 3.0.0** · [releases](https://github.com/Xtop1337/Velvet-music-player/releases)
 
 A desktop player built with **Rust (Tauri 2) + React + TypeScript**: speed up to 3x, slowed / nightcore / reverb presets,
