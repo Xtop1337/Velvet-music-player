@@ -4,6 +4,8 @@
 
 # Velvet — музыкальный плеер
 ![Popup](assets/discord/Снимок.JPG)
+![Popup](assets/discord/визуализатор.jpg)
+![Popup](assets/discord/фуллэкран-визуализатор.jpg)
 **Версия 3.0.0** · [релизы](https://github.com/Xtop1337/Velvet-music-player/releases)
 
 Десктопный плеер на **Rust (Tauri 2) + React + TypeScript**: скорость до 3x, slowed / nightcore / reverb-пресеты,
